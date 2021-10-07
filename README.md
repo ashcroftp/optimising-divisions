@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/414522491.svg)](https://zenodo.org/badge/latestdoi/414522491)
+
 # optimising-divisions
 Constrained optimisation of divisional load in hierarchically-organised tissues during homeostasis
 
