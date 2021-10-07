@@ -1,0 +1,299 @@
+\documentclass[$if(papersize)$$papersize$,$else$a4paper,$endif$$if(fontsize)$$fontsize$,$else$11pt,$endif$$for(classoption)$$classoption$$sep$,$endfor$]{article}
+% Options for documentclass (default):
+% - papersize: (a4paper)
+% - fontsize: (11pt)
+% - classoption: ()
+
+%% Geometry
+\usepackage[left=3.5cm,top=2.5cm,right=3.5cm,bottom=2.5cm]{geometry}
+
+%% Assign fonts and encoding
+\usepackage{setspace}
+\newcommand*{\authorfont}{\fontfamily{phv}\selectfont}
+$if(fontfamily)$
+\usepackage[$fontfamilyoptions$]{$fontfamily$}
+$else$
+\usepackage{lmodern}
+$endif$
+\usepackage[$if(fontenc)$$fontenc$$else$T1$endif$]{fontenc}
+\usepackage[utf8]{inputenc}
+
+%% Use math
+\usepackage{amsmath}
+
+%% Line numbers
+$if(lineno)$
+\usepackage{lineno}
+\linenumbers
+\renewcommand\linenumberfont{\normalfont\tiny\sffamily}
+\setlength\linenumbersep{1cm}
+$endif$
+
+%% Abstract formatting
+\usepackage{abstract}
+\renewcommand{\abstractname}{}    % clear the title
+\renewcommand{\absnamepos}{empty} % originally center
+\renewenvironment{abstract}
+{{%
+\setlength{\leftmargin}{0mm}
+\setlength{\rightmargin}{\leftmargin}%
+}%
+\relax}
+{\endlist}
+
+%% Section formatting
+\usepackage{titlesec}
+% \titleformat*{\section}{\large\bfseries}
+% \titleformat*{\subsection}{\normalsize\itshape}
+% \titleformat*{\subsubsection}{\normalsize\itshape}
+% \titleformat*{\paragraph}{\normalsize\itshape}
+% \titleformat*{\subparagraph}{\normalsize\itshape}
+
+%% Add R code blocks
+$if(listings)$
+\usepackage{listings}
+$endif$
+$if(lhs)$
+\lstnewenvironment{code}{\lstset{language=r,basicstyle=\small\ttfamily}}{}
+$endif$
+$if(highlighting-macros)$
+$highlighting-macros$
+$endif$
+$if(verbatim-in-note)$
+\usepackage{fancyvrb}
+$endif$
+$if(tables)$
+\usepackage{longtable,booktabs}
+$endif$
+
+%% Graphics
+\usepackage{graphicx,grffile}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+% Set up captions
+\usepackage{caption}
+\captionsetup[figure]{labelfont={bf},name={Figure},labelsep=space,font=small}
+
+%% Modifiy section numbers for appedix
+$if(appendix)$
+\renewcommand*\thesection{S\arabic{section}}
+\renewcommand*\thetable{S\arabic{table}}
+\renewcommand*\thefigure{S\arabic{figure}}
+$endif$
+
+%% Set up bibliography
+\usepackage{doi}
+%\usepackage{url}
+$if(natbib)$
+\usepackage{natbib}
+\bibliographystyle{$if(biblio-style)$$biblio-style$$else$plainnat$endif$}
+\usepackage[strings]{underscore} % protect underscores in most circumstances
+$endif$
+
+$if(biblatex)$
+\usepackage$if(biblio-style)$[style=$biblio-style$]$endif${biblatex}
+$if(biblatexoptions)$\ExecuteBibliographyOptions{$for(biblatexoptions)$$biblatexoptions$$sep$,$endfor$}$endif$
+$for(bibliography)$
+\addbibresource{$bibliography$}
+$endfor$
+$endif$
+$if(listings)$
+\usepackage{listings}
+$endif$
+
+%% Further options to be included
+$for(header-includes)$
+$header-includes$
+$endfor$
+
+% Hyperref
+\makeatletter
+\@ifpackageloaded{hyperref}{}{%
+\ifxetex
+  \PassOptionsToPackage{hyphens}{url}
+  \usepackage[setpagesize=false, % page size defined by xetex
+              unicode=false, % unicode breaks when used with xetex
+              xetex]{hyperref}
+\else
+  \PassOptionsToPackage{hyphens}{url}
+  \usepackage[draft,unicode=true]{hyperref}
+\fi
+}
+
+\@ifpackageloaded{color}{
+  \PassOptionsToPackage{usenames,dvipsnames}{color}
+}{%
+  \usepackage[usenames,dvipsnames]{color}
+}
+\makeatother
+\hypersetup{breaklinks=true,
+            bookmarks=true,
+            pdfauthor={$if(anonymous)$$else$$for(author)$$author.name$$sep$ and $endfor$$endif$},
+            pdftitle={$title$$if(subtitle)$: $subtitle$$endif$},
+            colorlinks=true,
+            citecolor=$if(citecolor)$$citecolor$$else$blue$endif$,
+            urlcolor=$if(urlcolor)$$urlcolor$$else$blue$endif$,
+            linkcolor=$if(linkcolor)$$linkcolor$$else$magenta$endif$,
+            pdfborder={0 0 0}}
+\urlstyle{same}  % don't use monospace font for urls
+
+% Add an option for endnotes
+$if(endnotes)$
+\usepackage{endnotes}
+\renewcommand{\enotesize}{\normalsize}
+\let\footnote=\endnote
+$endif$
+
+% Footnote without marker
+\usepackage[hang,flushmargin]{footmisc}
+\newcommand*{\blfootnote}[1]{%
+  \begingroup%
+  \renewcommand{\thefootnote}{}%
+  \footnotetext{#1}%
+  \addtocounter{footnote}{-1}%
+  \endgroup%
+}
+
+% add some other packages ----------
+$if(twocol)$
+\usepackage{multicol}
+$endif$
+% This should regulate where figures float
+% See: https://tex.stackexchange.com/questions/2275/keeping-tables-figures-close-to-where-they-are-mentioned
+\usepackage[section]{placeins}
+
+
+
+%% Define title and author block
+$if(title)$
+\title{$title$$if(subtitle)$: $subtitle$$endif$}
+$endif$
+
+$if(author)$
+\usepackage{authblk}
+\renewcommand*{\Affilfont}{\normalfont\small\itshape\raggedright}
+\renewcommand*{\Authfont}{\bfseries\authorfont\raggedright}
+\setlength{\affilsep}{0.2em}
+\makeatletter
+\renewcommand\AB@affilsepx{; \protect\Affilfont}
+\makeatother
+
+$for(author)$
+$if(author.name)$
+$if(author.number)$
+\author[$author.number$]{$author.name$}
+$else$
+\author[]{$author.name$}
+$endif$
+$else$
+\author{$author$}
+$endif$
+$endfor$
+
+$if(affil)$
+$for(affil)$
+$if(affil.name)$
+$if(affil.number)$
+\affil[$affil.number$]{$affil.name$}
+$else$
+\affil[]{$affil.name$}
+$endif$
+$else$
+\affil{$affil$}
+$endif$
+$endfor$
+$endif$
+$endif$
+
+\makeatletter
+\def\@maketitle{%
+  \newpage%
+  \setlength{\parindent}{0pt}%
+  %\thispagestyle{plain}%
+  \begin{minipage}{\textwidth}%
+  \raggedright\onehalfspacing%
+  {\fontsize{20}{24}\selectfont \@title}%
+  \end{minipage}%
+  \vskip 1.5em%
+  \begin{tabular}[t]{l}%
+    \@author%
+  \end{tabular}
+  \vskip -1em
+  $if(abstract)$
+  \begin{abstract}%
+  \noindent\hbox{\vrule height .2pt width \textwidth}%
+  \vskip 0.5em%
+  \textbf{Abstract}\\
+  $abstract$ \par
+  $if(keywords)$
+  \vskip 0.5em
+  \textbf{Keywords}: $keywords$ \par%
+  $endif$
+  \hbox{\vrule height .2pt width \textwidth}%
+  \end{abstract}%
+  $endif$
+  $if(toc)$
+  \hypersetup{linkcolor=black}%
+  \setcounter{tocdepth}{$toc-depth$}%
+  \tableofcontents%
+  $endif$
+}%
+%\fi
+\makeatother
+
+
+\begin{document}
+%% Display title block
+$if(removetitleabstract)$
+\null
+$else$
+$if(title)$
+\maketitle
+$endif$
+$if(notes)$
+\blfootnote{$notes$}
+$endif$
+$endif$
+
+%% Text body format
+\noindent $if(anonymous)$\doublespacing$else$$if(spacing)$\$spacing$spacing$endif$$endif$
+$if(twocol)$ \begin{multicols}{2}$endif$
+$body$
+$if(twocol)$ \end{multicols}$endif$
+$if(endnotes)$
+\newpage
+\theendnotes
+$endif$
+
+%% Add bibliography
+%\newpage
+\singlespacing
+$if(natbib)$
+$if(bibliography)$
+$if(biblio-title)$
+$if(book-class)$
+\renewcommand\bibname{$biblio-title$}
+$else$
+\renewcommand\refname{$biblio-title$}
+$endif$
+$endif$
+\bibliography{$for(bibliography)$$bibliography$$sep$,$endfor$}
+$endif$
+$endif$
+$if(biblatex)$
+\printbibliography$if(biblio-title)$[title=$biblio-title$]$endif$
+$endif$
+$for(include-after)$
+$include-after$
+$endfor$
+\end{document}

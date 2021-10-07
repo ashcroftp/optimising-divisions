@@ -1,0 +1,1805 @@
+---
+title: "Constrained optimisation of divisional load in hierarchically-organised tissues during homeostasis"
+author:
+- name: Peter Ashcroft and Sebastian Bonhoeffer
+affil:
+- name: Institute of Integrative Biology, ETH Zurich, Switzerland
+notes: "\\textbf{Current version}: `r format(Sys.time(), '%d %B, %Y')`;\\newline \\textbf{Correspondence}: \\href{mailto:peter.ashcroft@env.ethz.ch}{peter.ashcroft@env.ethz.ch}; \\textbf{ORCID iD}: \\href{https://orcid.org/0000-0003-4067-7692}{0000-0003-4067-7692} (PA) \\href{https://orcid.org/0000-0001-8052-3925}{0000-0001-8052-3925} (SB);\\newline \\textbf{Code availablity:} Code is publicly available at \\url{http://github.com/ashcroftp}."
+output:
+  pdf_document:
+    citation_package: natbib
+    fig_caption: true
+    latex_engine: pdflatex
+    template: new-template.tex
+    keep_tex: true
+header-includes: >
+  \newcommand{\avg}[1]{\left\langle #1 \right\rangle}
+  \renewcommand{\figurename}{Figure}
+  \renewcommand{\eqref}[1]{Eq.~(\ref{#1})}
+  \newcommand{\figref}[1]{\figurename~\ref{#1}}
+  \newcommand{\tabref}[1]{Table~\ref{#1}}
+  \newcommand{\cL}{\mathcal{L}}
+  \DeclareMathOperator*{\argmax}{arg\,max}
+  \DeclareMathOperator*{\argmin}{arg\,min}
+bibliography: bib.bib
+biblio-style: apalike3.bst
+fontfamily: mathpazo
+spacing: onehalf
+citecolor: black
+linkcolor: black
+lineno: true
+abstract: >
+  It has been hypothesised that the structure of tissues and the hierarchy of differentiation from stem cell to terminally-differentiated cell play a significant role in reducing the incidence of cancer in that tissue.
+  One specific mechanism by which this risk can be reduced is by minimising the number of divisions -- and hence the mutational risk -- that cells accumulate as they divide to maintain tissue homeostasis.
+  Here we investigate a mathematical model of cell division in a hierarchical tissue, calculating and minimising the divisional load while constraining parameters such that homeostasis is maintained.
+  We show that the minimal divisional load is achieved by binary division tress with progenitor cells incapable of self-renewal.
+  Contrary to the protection hypothesis, we find that an increased stem cell turnover can lead to lower divisional load.
+  Furthermore, we find that the optimal tissue structure depends on the time horizon of the duration of homeostasis, with faster stem cell division favoured in short-lived organisms and more progenitor compartments favoured in longer-lived organisms.
+---
+
+```{r setup, include = F}
+knitr::opts_chunk$set(
+  fig.width = 4,
+  fig.height = 4,
+  fig.align = "center",
+  cache = TRUE,
+  echo = FALSE,
+  warning = FALSE,
+  eval.after = "fig.cap"
+)
+library(tidyverse)
+library(reshape2)
+library(parallel)
+library(cowplot)
+library(RColorBrewer)
+
+#' Some plot functions
+plotTheme <- theme_bw() + theme(plot.background = element_rect(fill = "white", colour = "white"), panel.grid = element_blank(), strip.background = element_blank())
+#' Reduce text size
+plotTheme$text$size <- 12
+
+palette_OkabeIto <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+
+lineSize <- 1.2
+strokeSize <- 0.8
+my_geom_point <- geom_point(shape = 21, colour = "white", size = lineSize, stroke = strokeSize)
+
+dayLabels <- function(x) {
+  labs <- paste(x, ifelse(x == 1, "day", "days"))
+  names(labs) <- x
+  return(labs)
+}
+
+sciFormat <- function(l) {
+    l <- format(l, scientific = TRUE)
+    # Just plot 10^x
+    l <- gsub("\\+", "", gsub("e", "10^", gsub("^(.*)e", "e", l)))
+    # Return this as an expression
+    parse(text = l)
+}
+
+#' Parallel loop function
+ParLapply <- function(X, FUN, ..., PARALLEL = TRUE, SEED = NULL) {
+  if (PARALLEL) {
+    if (is.null(SEED)) SEED <- 111
+    num.cores <- min(c(length(X), max(detectCores() - 1, 1)))
+    cl <- makeCluster(num.cores, type = "FORK")
+    clusterSetRNGStream(cl, SEED)
+    out <- parLapply(cl, X, FUN, ...)
+    stopCluster(cl)
+    return(out)
+  } else {
+    out <- lapply(X, FUN, ...)
+    return(out)
+  }
+}
+```
+
+# Introduction {#sec:intro}
+
+Many tissues in the human body undergo constant regeneration of their constituent cells.
+This regeneration allows the tissue to maintain an effective function and to prevent damage accumulation, for example from exposure to acidic environments in the gut or ultraviolet light on the skin.
+In organs such as the colon, skin, and hematopoietic system, the regeneration is managed through a hierarchical organisation of stem and progenitor cells.
+These cells undergo amplification of numbers and phenotypic differentiation to produce the functional, terminally-differentiated cells in large enough quantities to support the functioning of the tissue.
+The hematopoietic system is the archetypal example of such a tissue: in humans $\sim 10^5$ hematopoietic stem cells \citep{leesix:Nature:2018} are ultimately responsible for producing $\sim 10^{11}$ terminally-differentiated cells per day to satisfy respiratory, immune, and coagulation demands \citep{kaushansky:book:2016,vaziri:PNAS:1994,nombela:BloodAdv:2017}.
+
+It has been hypothesised that hierarchical population structures have evolved to protect against the accumulation of mutant cells \citep{cairns:Nature:1975,nowak:PNAS:2003,pepper:PLOSComputationalBiology:2007,werner:Interface:2013,brenes:Interface:2013,derenyi:NatComms:2017,grajzel:PNAS:2020}.
+Empirical observations give weight to these claims: despite blood cells being over ten times more frequent than any other human cell type \citep{sender:PLoSBiol:2016}, hematopoietic cancers make up only a small fraction of cancer incidence statistics \citep{CRUK:LeukemiaIncidence:2015}.
+It has been suggested that the protection against cancer is conferred by limiting the cumulative number of cell divisions needed to maintain tissue homeostasis \citep{derenyi:NatComms:2017}, as well as ensuring that the majority of cells are transient such that continued cell turnover washes out mutants \citep{cairns:Nature:1975,nowak:PNAS:2003}.
+
+Mathematical models in which cells are grouped into homogeneous compartments (so-called compartmental models) have been employed to test different aspects of these cancer prevention hypotheses.
+With such models it is possible to calculate the number of divisions that cells undergo as they differentiate from stem cells to terminally-differentiated cells \citep{dingli:PLoSONE:2007,marciniak-czochra:SCD:2009,brenes:Interface:2013,derenyi:NatComms:2017,boettcher:Interface:2018,alvarado:PLOSComputationalBiology:2018}.
+The mutation risk is inherently linked to this number of divisions; every DNA replication event carries a risk of mistakes, such that more divisions means a higher risk of genetic damage.
+Once an expression is obtained for the number of cell divisions across the tissue, it is then possible to optimise the tissue architecture in order to minimise the number of divisions and the risk of mutation accumulation \citep{derenyi:NatComms:2017,alvarado:PLOSComputationalBiology:2018}.
+
+Using a computational model, \citet{pepper:PLOSComputationalBiology:2007} showed that increasing the number of compartments in hierarchically-organised tissues limits the somatic evolution (accumulation of multiple beneficial mutations) of those cells.
+Similarly, \citet{alvarado:PLOSComputationalBiology:2018} focussed optimising tissue structures to limit mutation accumulation.
+They found that the optimal tissue structure depends on the objective of optimisation: minimising the number of cells with a single mutation in the tissue requires a high degree of self-renewal across the compartments, while the time until two-hit mutants are generated is maximised by the non-self-renewing binary division tree.
+\citet{derenyi:NatComms:2017} were the first to compute the divisional load that is accumulated when producing a lifetime supply of terminally-differentiated cells, rather than explicitly focussing on somatic evolution.
+They found that optimal tissues which minimise divisional load follow a binary tree structure with no propensity for self-renewal among the progenitor cells, as well as a power law increase in differentiation output along the hierarchy.
+
+What is missing is the following: what happens if we constrain the optimisation of divisional load by ensuring tissue homeostasis, and what changes if we minimise divisions accumulated after stem cell differentiation or if we consider the total divisions (including stem cells) accumulated across a lifetime.
+Furthermore, what is the impact of the difference between the timescale on which evolution acts (i.e. until reproductive senescence) and the actual lifetime of an individual on divisional load?
+
+In the next section, we introduce our model of cell proliferation in a hierarchical population structure.
+For the purpose of our analyses, we primarily consider a reduced model in which only symmetric division events can occur.
+The full model, which considers symmetric and asymmetric cell divisions, as well as cell death, is outlined but the full analysis can only be found in the Appendices.
+We further consider the possibility for stem cells to be non-dividing, as it has been suggested that quiescence is another mechanism of cancer defence in hierarchical tissues \citep{adams:CSC:2015}.
+Using these models we quantify the number of divisions that cells accumulate.
+We then use the method of Lagrange multipliers to compute the optimum tissue architecture which minimises divisional load, while constraining the number of terminally-differentiated cells under homeostatic conditions.
+This optimisation is performed on post-stem cell divisions, as well as for total divisions accumulated over a given time horizon.
+
+
+# Methods {#sec:model}
+## Model structure
+We consider a compartmental model for cell proliferation in a hierarchical tissue, following the likes of \citet{marciniak-czochra:SCD:2009,brenes:PNAS:2011,stiehl:MCM:2011,boettcher:Interface:2018,nienhold:Blood:2020}.
+Cells are collected into compartments which represent their level of differentiation.
+Within each compartment, the cells are indistinguishable.
+The compartments are labelled by $i \in \{1,2,\dots,n\}$, where $i=1$ corresponds to stem cells (SC), $1<i<n$ are progenitor cells, and $i=n$ are terminally-differentiated cells (TDC).
+The number of cells in compartment $i$ is denoted as $N_i$.
+Additionally, we consider a compartment of non-dividing (quiescent) SCs, labelled $i=0$.
+This structure is highlighted in \figref{fig:1-model}A.
+We note that we only consider a linear population structure, with population branching here ignored to reduce the number of model parameters.
+
+```{r 1-model, fig.pos = "ht", out.width = "\\textwidth", fig.cap = caption}
+caption <- "Model schematic.
+A) We consider a hierarchical population of cells, with stem cells (SC) at the top of the hierarchy giving rise to progenitor cells and ultimately terminally-differentiated cells (TDC).
+SC can be divided into two subpopulations: a nondividing quiescent fraction (grey) and an active fraction (blue).
+B) In the full model, cells in compartment $i \\ge 1$ of the hierarchical population structure can divide symmetrically to generate two offspring of their own type (occurs with rate $a_i$) or two offspring that are differentiated from the parent (rate $b_i$), or they can divide asymmetrically to produce one offspring each type (rate $c_i$).
+Cells also die at rate $d_i$.
+Finally, the SC subpopulations are linked through activation and deactivation rates $\\gamma$ and $\\ell$, respectively.
+C) A reduced model is derived from the full model, where cells can only symmetrically self-renew or symmetrically differentiate and there are no quiescent SCs.
+Here cells in compartment $i$ divide with rate $\\beta_i$.
+With probability $\\alpha_i$ the daughters are both of type $i$, and with complimentary probability $1-\\alpha_i$ the daughters are of differentiated type $i+1$.
+The parameter $\\beta_n$ assumes the role of the death rate of TDCs, where we have $\\alpha_n = 0$.
+We also ignore SC quiescence in the reduced model."
+knitr::include_graphics("figures/1-model.pdf")
+```
+
+## Dynamics
+Cells move between compartments through differentiation, which is strictly coupled to cell division in this model.
+A division event produces two daughter cells, each of which may remain in the same compartment as the mother cell ($i$), or differentiate to the next compartment along the hierarchy ($i+1$).
+We do not consider the possibility of de-differentiation (i.e. cells cannot move from compartment $i$ to compartment $i-1$).
+De-differentiation would lead to an increase in divisions accumulated during homeostasis compared to a forward-only differentiating tissue.
+
+Concretely, in the full model (\figref{fig:1-model}B) cells in compartment $i$ divide to generate two daughter cells in the same compartment (symmetric self-renewal) with rate $a_i$.
+With rate $b_i$, two differentiated daughter cells of type $i+1$ are produced (symmetric differentiation).
+Cells can also divide asymmetrically with rate $c_i$, such that one daughter remains as type $i$ and the other differentiates to type $i+1$.
+The quiescent SCs ($i=0$) do not divide, but can be activated with rate $\gamma$, while the active SCs ($i=1$) can deactivate with rate $\ell$.
+These dynamics are similar to those proposed by \citet{glauche:PLoSCB:2009,takizawa:JEM:2011}.
+Finally, all non-quiescent cells ($i>0$) die with rate $d_i$.
+
+For the full model (\figref{fig:1-model}B), the number of cells per compartment are described by the following ordinary differential equations (ODE):
+\begin{equation}
+\begin{aligned}
+\dot{N}_0 &= -\gamma N_0 + \ell N_1, \\
+\dot{N}_1 &= \gamma N_0 - (\ell+b_1+d_1-a_1)N_1, \\
+\dot{N}_{i} &= (2b_{i-1} + c_{i-1})N_{i-1} - (b_i+d_i-a_i)N_i \quad\mbox{for}\quad 2 \le i \le n.
+\end{aligned}
+\label{eq:model-Full}%
+\end{equation}
+
+To ensure that the SCs are omnipresent we require $a_1 = b_1 + d_1$, i.e. any SC lost to differentiation or death is replaced by the self-renewal of another SC.
+To ensure homoeostasis is possible we require $b_i + d_i - a_i > 0$ for $2 \le i \le n$, otherwise $N_i$ would grow exponentially.
+We further assume that $a_n = b_n = c_n = 0$ such that TDCs do not divide, as well as $d_n>0$ to ensure that a steady-state exists.
+
+Under homeostatic conditions we have $\dot{N}_i = 0$ for each compartment $0 \le i \le n$.
+From \eqref{eq:model-Full}, the equilibrium solution $N_i^*$ satisfies
+\begin{equation}
+\begin{aligned}
+N_0^* &= \frac{\ell}{\ell+\gamma}N_{\rm SC}^*, \\
+N_1^* &= \frac{\gamma}{\ell+\gamma}N_{\rm SC}^*, \\
+(b_i+d_i-a_i) N_i^* &= (2b_{i-1}+c_{i-1})N_{i-1}^*  \quad\mbox{for}\quad 2 \le i \le n,
+\end{aligned}
+\label{eq:SS-Full}%
+\end{equation}
+where $N_{\rm SC}^*=  N_0^*+N_1^*$ is the total number of stem cells.
+For $2 \le i \le n$, \eqref{eq:SS-Full} can be solved recursively to give
+\begin{equation}
+\begin{aligned}
+N_i^* &= \left[\prod_{k=1}^{i-1} \frac{2b_k+c_k}{b_{k+1}+d_{k+1}-a_{k+1}}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^* \\
+&= \frac{2b_1+c_1}{b_i+d_i-a_i}\left[\prod_{k=2}^{i-1} \frac{2b_k+c_k}{b_k+d_k-a_k}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^* \quad\mbox{for}\quad 2 \le i \le n.
+\end{aligned}
+\label{eq:SSi-Full}%
+\end{equation}
+In particular, for TDCs ($i=n$) we have
+\begin{equation}
+N_n^* = \frac{2b_1+c_1}{d_n}\left[\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k+d_k-a_k}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^*.
+\label{eq:SSn-Full}%
+\end{equation}
+
+## Reduced model
+To build intuition and guide analytical calculations, we primarily consider a reduced model (\figref{fig:1-model}C), where we ignore cell death and asymmetric cell division, as well as SC quiescence.
+In this scenario, we write $a_i = \alpha_i \beta_i$ and $b_i = (1-\alpha_i)\beta_i$, where $\beta_i$ is the division rate of cells in compartment $i$, and $\alpha_i$ is their probability of self-renewal (correspondingly, $1-\alpha_i$ is the probability of differentiation) following a division event.
+This reduced model is described by the set of ordinary differential equations
+\begin{equation}
+\dot{N}_i = 2 (1 - \alpha_{i-1})\beta_{i-1} N_{i-1} - (1 - 2\alpha_i) \beta_i N_i,
+\label{eq:model-Reduced}
+\end{equation}
+where the first term describes the inflow of two daughter cells from compartment $i-1$ and the second term is the net loss rate (differentiation minus self-renewal) of cells from compartment $i$.
+Furthermore, we set $\alpha_n = 0$ and the parameter $\beta_n$ assumes the role of the death rate of the TDCs.
+In the reduced model we ignore SC quiescence by setting $N_0=0$, as well as $\gamma=\ell=0$.
+
+Under homeostasis the number of cells per compartment does not change (${\dot{N}_i=0}$).
+The steady state of \eqref{eq:model-Reduced}, which we write as $N_i^*$, satisfies the relation
+\begin{equation}
+(1-2\alpha_i) \beta_i N_i^* = 2 (1-\alpha_{i-1})\beta_{i-1} N_{i-1}^*,
+\label{eq:SS-Reduced}
+\end{equation}
+i.e. the net loss from compartment $i$ is balanced by the influx from differentiating cells in compartment $i-1$.
+For this steady state to exist, we require $\alpha_1 = 0.5$ and $\alpha_i < 0.5$ for $1 < i < n$.
+Solving \eqref{eq:SS-Reduced} recursively, we have
+\begin{equation}
+N_i^* = \frac{\beta_1}{\beta_i}\left[\prod_{k=1}^{i-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_{k+1}} \right] N_1^* = \frac{1}{1-2\alpha_i} \frac{\beta_1}{\beta_i}\left[\prod_{k=2}^{i-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_k} \right]N_1^*.
+\label{eq:SSi-Reduced}
+\end{equation}
+In particular, for TDCs ($i=n$) we have
+\begin{equation}
+N_n^* = \frac{\beta_1}{\beta_n}\left[\prod_{k=2}^{n-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_k} \right]N_1^*.
+\label{eq:SSn-Reduced}
+\end{equation}
+
+## Counting divisions
+For compartmental models, the expected number of divisions that cells accumulate in a tissue has previously been calculated using two methods:
+Firstly, \citet{derenyi:NatComms:2017} constructed ordinary differential equations (ODE) for the cumulative number of divisions across all cells in a compartment, and from this they extracted the average number of divisions that cells undergo during their lifetime.
+Alternatively, \citet{boettcher:Interface:2018} constructed an explicit set of ODEs for sub-populations of cells of type $i$ that have undergone $j$ division events, from which the mean number of divisions per cell is easily extracted.
+These models yield identical results for the mean number of divisions in the full and reduced models, as described in \ref{appendix:divLoad-Reduced} and \ref{appendix:divLoad-Full}, respectively.
+
+
+Briefly, following the method of \citet{derenyi:NatComms:2017}, the cumulative number of divisions accumulated across all SCs, $T_1$, in the reduced model satisfies the ODE
+\begin{equation}
+\dot{T}_1 = \alpha_1\beta_1 N_1^* \left[\frac{T_1}{N_1^*}+2\right] - (1-\alpha_1)\beta_1 N_1^*\left[\frac{T_1}{N_1^*}\right]
+= \beta_1 N_1^*,
+\label{eq:divSC-ODE-Reduced}
+\end{equation}
+where we have used $\alpha_1=0.5$.
+Together with the initial condition $T_1(0) = 0$, \eqref{eq:divSC-ODE-Reduced} can be solved to give $T_1(t) = \beta_1 N_1^* t$.
+Hence, the average number of divisions per SC at time $t$, $D_1(t)$, satisfies
+\begin{equation}
+D_1(t) = \frac{T_1(t)}{N_1^*} = \beta_1 t,
+\label{eq:divSC-Reduced}
+\end{equation}
+i.e. SC divisions are accumulated linearly with time.
+
+The derivation of the equations for $\dot{T}_i$ [similar to \eqref{eq:divSC-ODE-Reduced}] for all compartments $1 \le i \le n$ is described in \ref{appendix:divLoad-Reduced}.
+Ultimately, the expected number of divisions that cells accumulate after a time period $t$, $D_i(t)$, is described by a set of linear ODEs which can be solved analytically.
+However, the resulting expression becomes increasingly complicated for large $n$.
+Instead, we here make the assumption that the SC dynamics are much slower than non-SCs.
+We can then express the mean number of divisions per TDC at time $t$, $D_n(t)$, as the sum of the SC divisions up to that point in time [\eqref{eq:divSC-Reduced}] plus the expected number of divisions that are accumulated \textit{after} SC differentiation, $D_n$.
+The latter term can be calculated (see \ref{appendix:divLoad-Reduced}) as
+\begin{equation}
+D_n = \sum_{j=2}^n \frac{1}{1-2\alpha_j}.
+\label{eq:divTDC-Reduced}
+\end{equation}
+Hence, in the reduced model, the divisions accumulated by TDCs after time $t$ is approximated by
+\begin{equation}
+D_n(t) \approx D_{\rm SC}(t) + D_n = \beta_1 t + \sum_{j=2}^n \frac{1}{1-2\alpha_j}.
+\label{eq:divTDC-t-Reduced}
+\end{equation}
+
+The above methodology can also be applied to the full model, as described in \ref{appendix:divLoad-Full}.
+The average number of divisions that a SC (averaged over quiescent and non-quiescent) has accumulated in a time period $t$, $D_{\rm SC}(t)$, is now
+\begin{equation}
+D_{\rm SC}(t) = (2a_1+c_1) \frac{\gamma}{\ell+\gamma} t.
+\label{eq:divSC-Full}
+\end{equation}
+The mean number of divisions that are accumulated by a single TDC after leaving the stem cell compartment, $D_n$, is
+\begin{equation}
+D_n = \sum_{j=2}^n \frac{a_j+b_j+c_j+d_j}{b_j+d_j-a_j} 
+= \sum_{j=2}^{n-1} \left(\frac{2b_j+c_j+2d_j}{b_j+d_j-a_j} - 1\right) + 1.
+\label{eq:divTDC-Full}
+\end{equation}
+Finally, we approximate the mean number of divisions per TDC at time $t$, $D_n(t)$, as the sum of \eqref{eq:divSC-Full} and \eqref{eq:divTDC-Full}:
+\begin{equation}
+D_n(t) \approx (2a_1+c_1) \frac{\gamma}{\ell+\gamma} t + \sum_{j=2}^{n-1} \left(\frac{2b_j+c_j+2d_j}{b_j+d_j-a_j} - 1\right) + 1.
+\label{eq:divTDC-t-Full}
+\end{equation}
+This equation is equivalent to the result of \citet{derenyi:NatComms:2017}, but here with the inclusion of SC quiescence.
+The calculation differs from \citet{derenyi:NatComms:2017} in the optimisation procedure in the next steps.
+
+## Optimising tissue architecture
+Given the expressions for the expected number of divisions accumulated per TDC, we can minimise these values -- subject to physical constraints -- to deduce the optimal tissue structure parameters which minimise the divisional load.
+The constraint that we apply is that during homoeostasis the tissue should maintain a given number of TDCs, such that the tissue remains functional.
+For the reduced model, we derive the constraint from the equilibrium TDC population size, \eqref{eq:SSn-Reduced}, which we rearrange as
+\begin{equation}
+\prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N^*_n}{\beta_1 N^*_1} = 0.
+\label{eq:constraint-Simple}
+\end{equation}
+The parameters $\alpha_i$ ($1<i<n$), $\beta_1$, $N_1^*$ and $n$ must satisfy this relation to ensure that enough TDCs are present in the tissue.
+We keep the number of TDCs ($N_n^*$) and the death rate of TDCs ($\beta_n$) fixed, as well as setting $\alpha_1=0.5$ and $\alpha_n=0$ as required in the model definition.
+
+We then use the method of Lagrange multipliers \citep{bertsekas:book:2014} to constrain the homeostatic number of TDCs and minimise the tissue's divisional load.
+The objective function that is to be optimised is the number of divisions accumulated per TDC, which we can construct in one of two ways:
+Firstly, we can consider only the divisions accumulated after a SC has differentiated, $D_n$ [\eqref{eq:divTDC-Reduced}].
+In this scenario, we drop the time dependence and only focus on optimising the differentiation structure of the tissue.
+The Lagrangian function is then constructed as the linear combination of \eqref{eq:divTDC-Reduced} and \eqref{eq:constraint-Simple}, i.e.
+\begin{equation}
+\cL = \sum_{j=2}^n \frac{1}{1-2\alpha_j} -
+\lambda \left[\prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N_n^*}{\beta_1 N_1^*} \right],
+\label{eq:L-Simple}
+\end{equation}
+where the coefficient $\lambda$ is the Lagrange multiplier.
+
+Secondly, we can include SC divisional history and ask how many divisions have TDCs accumulated after a given time $t$, $D_n(t)$, using the approximation in \eqref{eq:divTDC-t-Reduced} as the objective function.
+The Lagrangian function in this case is
+\begin{equation}
+\cL(t) = \beta_1 t + \sum_{j=2}^n \frac{1}{1-2\alpha_j} -
+\lambda \left[\prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N_n^*}{\beta_1 N_1^*} \right].
+\label{eq:L-t-Simple}
+\end{equation}
+
+The optimum tissue architecture is then found by computing the stationary points of $\cL$ or $\cL(t)$ considered as a function of $\alpha_i$ ($1<i<n$), $\beta_1$, and the Lagrange multiplier $\lambda$.
+Due to the discrete nature of $n$, we cannot identify its optimum value through stationary point analysis.
+We can, however, identify it through graphical methods.
+The number of SCs does not appear in the objective function in the Lagrangian, so this too must be optimised by graphical methods.
+
+The Lagrangian functions for the full model can be constructed analogously from the population size constraint in \eqref{eq:SSn-Full}, 
+as well as the number of divisions accumulated after SC differentiation [\eqref{eq:divTDC-Full}] or divisional load after time $t$ [\eqref{eq:divTDC-t-Full}].
+See \ref{appendix:optim-Full} for details.
+
+
+# Results {#sec:results}
+
+Although our results are algebraic, we illustrate these results using the observed parameters of human erythropoiesis (red blood cell production).
+Concretely, a healthy human has $\sim 10^{13}$ red blood cells at any given time \citep{sender:PLoSBiol:2016} and these cells have a lifetime of $\sim 120$ days \citep{nombela:BloodAdv:2017}.
+The most recent estimates of human hematopoietic stem cell (HSC) numbers are $\sim 10^{5}$ cells which divide approximately once per year \citep{leesix:Nature:2018}.
+
+## Optimised tissue architectures in the reduced model
+### Additional divisions after stem cell differentiation
+To determine the architecture that minimises the divisional load, one needs to find the stationary points of the Lagrangian function in \eqref{eq:L-Simple}.
+These stationary points satisfy $\partial\cL/\partial\alpha_i=0$ ($1<i<n$) and $\partial\cL/\partial\lambda=0$.
+As the SC division rate $\beta_1$ features only in the constraint and not in the objective function, this parameter cannot be optimised through stationary point analysis.
+The values of the $\alpha_i$ at the stationary point of $\cL$ are the parameters which minimise the number of divisions accumulated by the TDCs after leaving the SC compartment, while still maintaining the homeostatic population of TDCs.
+
+From the $\partial\cL/\partial\alpha_i=0$ (for $1<i<n$) condition, we arrive at
+\begin{equation}
+\frac{2(1-\alpha_i)}{1-2\alpha_i} = \lambda \prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k},
+\end{equation}
+which is only satisfied if
+\begin{equation}
+\frac{2(1-\alpha_i)}{1-2\alpha_i} = \lambda^{\frac{1}{3-n}}.
+\label{eq:alpha-lambda}
+\end{equation}
+This implies that all $\alpha_i$ are equal for $1<i<n$ in a tissue which minimises the divisional load after SC differentiation.
+This equivalence of the $\alpha_i$ across compartments was used by \citet{boettcher:Interface:2018} and \citet{alvarado:PLOSComputationalBiology:2018} as a simplifying assumption without derivation.
+Furthermore, this result is consistent with the result of \citet{derenyi:NatComms:2017}, who found that the ratio of differentiation output between two consecutive compartments is constant in optimised tissues. 
+
+The value of $\lambda$, and ultimately the value of the $\alpha_i$, are obtained from the $\partial\cL/\partial\lambda=0$ condition, which is equal to the population size constraint [\eqref{eq:constraint-Simple}].
+By substituting \eqref{eq:alpha-lambda} into \eqref{eq:constraint-Simple} and then solving for $\lambda$, we find the value of the Lagrange multiplier
+\begin{equation}
+\lambda = \left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right)^\frac{3-n}{n-2}.
+\end{equation}
+By rearranging \eqref{eq:alpha-lambda} we can now define the values of $\alpha_i$ which minimise the number of divisions per TDC during homeostasis and for a given number of compartments, which we write as $\hat{\alpha}(n)$:
+\begin{equation}
+\hat{\alpha}(n) = \frac{\lambda^{\frac{1}{3-n}}-2}{2\lambda^{\frac{1}{3-n}}-2}
+= \frac{\left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right)^\frac{1}{n-2}-2}{2\left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right)^\frac{1}{n-2}-2}.
+\label{eq:alpha}
+\end{equation}
+From this equation, we see that an increase in the number of compartments $n$ must be compensated by a decrease in the progenitor self-renewal probability $\hat{\alpha}(n)$ to maintain the homeostatic level of TDCs.
+However, $\hat{\alpha}(n)$ is a probability and is bounded from below by zero.
+Once $n$ is increased sufficiently such that $(\beta_n N_n^*/\beta_1 N_1^*)^\frac{1}{n-2} < 2$, we have to artificially set $\hat{\alpha}(n) = 0$ and there will be a new (increased) steady state TDC population size $\hat{N}_n$.
+From \eqref{eq:SSn-Reduced}, the number of TDCs will satisfy
+\begin{equation}
+\hat{N}_n = \frac{\beta_1 N_1^*}{\beta_n} \left(\frac{2[1 - \hat{\alpha}(n)]}{1 - 2\hat{\alpha}(n)} \right)^{n-2},
+\label{eq:Nhat}
+\end{equation}
+while the number of divisions per TDC after SC differentiation [\eqref{eq:divTDC-Reduced}] satisfies
+\begin{equation}
+\hat{D}_n = (n-2)\frac{1}{1-2\hat{\alpha}(n)} + 1.
+\label{eq:Dhat}
+\end{equation}
+The minimum number of divisions occurs when $\hat{\alpha}(n)$ first reaches zero, i.e. when $(\beta_n N_n^*/\beta_1 N_1^*)^\frac{1}{n-2} = 2$.
+At this point the number of compartments is given by
+\begin{equation}
+\hat{n} = \log_2\left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right) + 2,
+\label{eq:nHat-noTime}
+\end{equation}
+and the divisional load per TDC is
+\begin{equation}
+\hat{D}_{\hat{n}} = \log_2\left(\frac{\beta_n N^*_n}{\beta_1 N^*_1}\right) + 1 = \hat{n}-1.
+\label{eq:Dhat-nhat}
+\end{equation}
+Therefore, perhaps unsurprisingly, the binary division tree ($\hat{\alpha}(n)=0$) with minimal number of compartments ($n=\hat{n}$) is the tissue structure which minimises divisional load while maintaining the TDC population.
+As shown by \citet{boettcher:Interface:2018}, both the mean and variance of the cumulative number of cell divisions is minimal for this non-self-renewing structure.
+If the number of compartments $n$ is smaller than $\hat{n}$, then there must be some self-renewal in the progenitor compartments, which leads to an increase in the cumulative number of divisions.
+If $n > \hat{n}$, then there are more divisions than required to maintain the TDC population and the tissue produces more TDCs than necessary.
+
+The values of $\hat{\alpha}(n)$ (probability of self-renewal that minimises divisional load per TDC), $\hat{N}_n$ (the corresponding number of TDCs), and $\hat{D}_n$ (the divisional load per TDC) are illustrated in \figref{fig:2-noTime-Simple}A-C as a function of total SC turnover ($\beta_1 N_1^*$) and the number of compartments in the tissue ($n$).
+The line described by \eqref{eq:nHat-noTime} (dashed diagonal) does indeed follow the minimum divisional load; any change in \emph{either} SC turnover or the number of compartments leads to an increase in divisional load.
+However, by moving along this line [\eqref{eq:nHat-noTime}], in particular to higher SC turnover and lower number of compartments, the divisional load can be reduced, as shown in \figref{fig:2-noTime-Simple}F.
+Therefore, the tissues which minimise divisional load after SC differentiation would have very high SC turnover and few differentiation steps.
+
+If the SC turnover is fixed for another reason (e.g. due to spatial and nutritional niche competition), then the minimum divisional load occurs when there are enough compartments such that there is no progenitor self-renewal ($\hat{\alpha}(n)=0$), but not too many such that TDCs are not overproduced ($\hat{N}_n = N_n^*$) [\figref{fig:2-noTime-Simple}D-F].
+
+
+```{r 2-noTime-Simple, fig.height = 7, fig.width = 9, fig.cap = caption, fig.pos = "ht"}
+caption <- "Self-renewal probability ($\\hat{\\alpha}(n)$; A), TDC population size ($\\hat{N}_n$; B), and cumulative number of divisions per TDC after SC differentiation ($\\hat{D}_n$; C) as a function of the number of compartments $n$ and SC turnover (total divisions per year) $\\beta_1 N_1^*$ for the reduced model.
+Here we have fixed the TDC properties ${\\beta_n = 1/120}$~day\\textsuperscript{$-1$} and ${N_n^* = 10^{13}}$~cells, which are approximate numbers for red blood cells in humans \\citep{nombela:BloodAdv:2017}.
+Horizontal line is the approximate SC turnover in humans ($N_1^* = 10^{5}$~cells; $\\beta_1 = 1$~yr\\textsuperscript{$-1$}; \\citet{leesix:Nature:2018}).
+Diagonal dashed line represents the optimum number of compartments $\\hat{n}$ for a given SC turnover which minimises the cumulative number of divisions [\\eqref{eq:nHat-noTime}].
+The values of $\\hat{\\alpha}(n)$, $\\hat{N}_n$, and $\\hat{D}_n$ along these slices are shown in panels D, E, and F, respectively.
+Colour scales for $\\hat{N}_n$ and $\\hat{D}_n$ are truncated for visual clarity."
+
+## Blood system parameters ----
+beta.n <- 1/120 * 365 # yr^-1
+N.n <- 1e13
+n.vals <- seq(5, 45, 1)
+SCflux.vals <- 10^seq(0,10,0.25) # divisions per year
+base.flux <- 1 * 10^5
+
+n.opt <- data.frame(
+  SCflux = SCflux.vals,
+  n = log2(beta.n * N.n / SCflux.vals) + 2
+)
+
+## simple model; without time ----
+data.noTime <- lapply(n.vals, function(n) {
+  lapply(SCflux.vals, function(SCflux) {
+    #' Lagrange multiplier value
+    lambda <- (beta.n * N.n / SCflux)^((3-n)/(n-2))
+    
+    #' Optimised alpha values
+    alpha <- min(0.5,max(0,
+                 ((beta.n * N.n / SCflux)^(1/(n-2)) - 2) /
+                   (2*(beta.n * N.n / SCflux)^(1/(n-2)) - 2)
+    ))
+    
+    #' Cumulative number of divisions
+    Dn <- (n-2) * (1/(1 - 2*alpha)) + 1
+
+    #' TDC pop. size
+    Nn <- (SCflux / beta.n) * ((2*(1-alpha)) / (1-2*alpha))^(n-2)
+
+    #' Combine data
+    data.frame(
+      n = n,
+      SCflux = SCflux,
+      lambda = lambda,
+      alpha = alpha,
+      Dn = Dn,
+      Nn = Nn
+    )
+  }) %>% bind_rows()
+}) %>% bind_rows()
+
+slice.data <- rbind(
+  lapply(n.vals, function(n) {
+    SCflux <- base.flux
+    
+    lambda <- (beta.n * N.n / SCflux)^((3-n)/(n-2))
+    alpha <- min(0.5,max(0,
+                         ((beta.n * N.n / SCflux)^(1/(n-2)) - 2) /
+                           (2*(beta.n * N.n / SCflux)^(1/(n-2)) - 2)
+    ))
+    Dn <- (n-2) * (1/(1 - 2*alpha)) + 1
+    Nn <- (SCflux / beta.n) * ((2*(1-alpha)) / (1-2*alpha))^(n-2)
+    
+    data.frame(
+      n = n,
+      SCflux = SCflux,
+      lambda = lambda,
+      alpha = alpha,
+      Dn = Dn,
+      Nn = Nn,
+      type = factor("fixed SC turnover", levels = c("fixed SC turnover","optimised SC turnover"))
+    )
+  }) %>% bind_rows(),
+  lapply(n.vals, function(n) {
+    SCflux <- 2^(2-n) * beta.n * N.n
+    
+    lambda <- (beta.n * N.n / SCflux)^((3-n)/(n-2))
+    alpha <- min(0.5,max(0,
+                         ((beta.n * N.n / SCflux)^(1/(n-2)) - 2) /
+                           (2*(beta.n * N.n / SCflux)^(1/(n-2)) - 2)
+    ))
+    Dn <- (n-2) * (1/(1 - 2*alpha)) + 1
+    Nn <- (SCflux / beta.n) * ((2*(1-alpha)) / (1-2*alpha))^(n-2)
+    
+    data.frame(
+      n = n,
+      SCflux = SCflux,
+      lambda = lambda,
+      alpha = alpha,
+      Dn = Dn,
+      Nn = Nn,
+      type = factor("optimised SC turnover", levels = c("fixed SC turnover","optimised SC turnover"))
+    )
+  }) %>% bind_rows()
+)
+
+plot_grid(
+  ggplot(data.noTime, aes(x = n, y = SCflux)) +
+    geom_raster(aes(fill = alpha), interpolate = T) +
+    geom_contour(aes(z = alpha), breaks = seq(0,0.5,0.1) + 1e-4, colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.flux, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(0,0.5),
+                         guide = guide_colourbar(
+                           title = expression("self-renewal" ~ (hat(alpha)(italic(n)))),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC turnover (divisions per year)")),
+  
+  ggplot(data.noTime, aes(x = n, y = SCflux)) +
+    geom_raster(aes(fill = log10(Nn)), interpolate = T) +
+    geom_contour(aes(z = log10(Nn)), breaks = seq(13,20) + 1e-2, colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.flux, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(12.95,20),
+                         breaks = seq(13,20,1),
+                         labels = ifelse(seq(13,20,1) %% 2 == 0, "", sciFormat(10^seq(13,20,1))),
+                         guide = guide_colourbar(
+                           title = expression("number of TDCs" ~ (hat(italic(N))[italic(n)])),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC turnover (divisions per year)")),
+  
+  ggplot(data.noTime, aes(x = n, y = SCflux)) +
+    geom_raster(aes(fill = Dn), interpolate = T) +
+    geom_contour(aes(z = Dn), breaks = seq(0,50,10), colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.flux, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(0,50),
+                         guide = guide_colourbar(
+                           title = expression("divisions per TDC" ~ (hat(italic(D))[n])),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC turnover (divisions per year)")),
+  
+  
+  ggplot(slice.data, aes(x = n, y = alpha, group = type, colour = type)) +
+    geom_vline(xintercept = log2(beta.n * N.n / base.flux) + 2, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_continuous(limits = c(0,0.5)) +
+    scale_linetype_manual(values = c(`fixed SC turnover` = "solid",`optimised SC turnover` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC turnover` = palette_OkabeIto[5],`optimised SC turnover` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = "none") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("self-renewal" ~ (hat(alpha)(italic(n))))),
+  
+  ggplot(slice.data, aes(x = n, y = Nn, group = type, colour = type)) +
+    geom_vline(xintercept = log2(beta.n * N.n / base.flux) + 2, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(limits = 10^c(12.99,18.01), breaks = 10^seq(13,18), labels = sciFormat) +
+    scale_linetype_manual(values = c(`fixed SC turnover` = "solid",`optimised SC turnover` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC turnover` = palette_OkabeIto[5],`optimised SC turnover` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = c(0.48,0.88), legend.background = element_blank(), legend.key.width = unit(1.5, "cm")) +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("number of TDCs" ~ (hat(italic(N))[italic(n)]))),
+  
+  ggplot(slice.data, aes(x = n, y = Dn, group = type, colour = type)) +
+    geom_vline(xintercept = log2(beta.n * N.n / base.flux) + 2, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_continuous(limits = c(0,50)) +
+    scale_linetype_manual(values = c(`fixed SC turnover` = "solid",`optimised SC turnover` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC turnover` = palette_OkabeIto[5],`optimised SC turnover` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = "none") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("divisions per TDC" ~ (hat(italic(D))[n]))),
+  
+  align = "v", axis = "lrtb", nrow = 2, labels = "AUTO", rel_heights = c(4,3)
+)
+```
+
+
+### Cumulative divisions after lifetime $t$
+The objective function in the Lagrangian $\cL(t)$ [\eqref{eq:L-t-Simple}], which now counts SC divisions too, is explicitly dependent on the SC division rate parameter $\beta_1$, as well as on the organism's lifetime.
+We can now determine the parameters and tissue structure which minimise the divisional load after a time period $\tau$, which we call the timescale of optimisation.
+The optimum parameter values must satisfy $\partial\cL(\tau)/\partial\alpha_i=0$ ($1<i<n$), $\partial\cL(\tau)/\partial\lambda=0$, as well as $\partial\cL(\tau)/\partial\beta_1=0$.
+Note that $\tau$ is the timescale of optimisation: it is entirely possible that the organism lives for a shorter ($t<\tau$) or longer ($t>\tau$) time and we therefore have to consider two timescales.
+
+The partial derivative of $\cL(\tau)$ [\eqref{eq:L-t-Simple}] with respect to $\alpha_i$ are unchanged from the previous section, such that the condition \eqref{eq:alpha-lambda} must be satisfied.
+From the condition $\partial\cL(\tau)/\partial\beta_1=0$, we arrive at
+\begin{equation}
+\beta_1 = \sqrt{\frac{\lambda}{\tau}\frac{\beta_n N_n^*}{N_1^*}}.
+\label{eq:beta-lambda}
+\end{equation}
+These values of $\alpha_i$ [\eqref{eq:alpha-lambda}] and $\beta_1$ [\eqref{eq:beta-lambda}] can be substituted into the population size constraint \eqref{eq:constraint-Simple}, i.e. the $\partial\cL(\tau)/\partial\lambda=0$ condition, and we can solve for the value of the Lagrange multiplier $\lambda$:
+\begin{equation}
+\lambda = \left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{3-n}{n-1}.
+\end{equation}
+The values of $\alpha_i$ and $\beta_1$ which minimise the number of divisions per TDC after time $\tau$ are thus given by
+\begin{equation}
+\alpha_i = \hat{\alpha}(n) = \frac{\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{1}{n-1}-2}{2\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{1}{n-1}-2},
+\quad \hat{\beta}_1(n) = \frac{1}{\tau}\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^{\frac{1}{n-1}}.
+\label{eq:alphabeta}
+\end{equation}
+To satisfy $\hat{\alpha}(n) \ge 0$, we require $(\tau\beta_n N^*_n/N^*_1)^\frac{1}{n-1} \ge 2$.
+This condition imposes $\hat{\beta}_1(n) \ge 2/\tau$.
+
+From \eqref{eq:SSn-Reduced}, the number of TDCs will satisfy
+\begin{equation}
+\hat{N}_n = \frac{\hat{\beta}_1(n) N_1^*}{\beta_n} \left(\frac{2[1 - \hat{\alpha}(n)]}{1 - 2\hat{\alpha}(n)} \right)^{n-2},
+\label{eq:Nhat-t}
+\end{equation}
+while the number of divisions per TDC after time $t$ [\eqref{eq:divTDC-t-Reduced}] satisfies
+\begin{equation}
+\hat{D}_n(t) = \hat{\beta}_1(n) t + (n-2)\frac{1}{1-2\hat{\alpha}(n)} + 1.
+\label{eq:Dhat-t}
+\end{equation}
+The minimum number of divisions occurs when $\hat{\alpha}(n)=0$ and $\hat{\beta}_1(n)=2/\tau$, or when $(\tau \beta_n N_n^*/N_1^*)^\frac{1}{n-1} = 2$.
+At this point the number of compartments is given by
+\begin{equation}
+\hat{n} = \log_2\left(\frac{\tau \beta_n N_n^*}{N_1^*}\right) + 1,
+\label{eq:nHat-t}
+\end{equation}
+and the divisional load per TDC is
+\begin{equation}
+\hat{D}_{\hat{n}}(t) = 2\frac{t}{\tau} + \hat{n} - 1.
+\label{eq:Dhat-nhat-t}
+\end{equation}
+
+Firstly, we consider the optimised parameters and divisional load when the lifetime is equal to the optimisation timescale ($t = \tau = 70$ years).
+For this case, the values of $\hat{\alpha}(n)$, $\hat{\beta}_1(n)$, $\hat{N}_n$, and $\hat{D}_n$ are illustrated in \figref{fig:3-time-Simple}A-D as a function of SC number ($N_1^*$) and the number of compartments in the tissue ($n$).
+The line described by \eqref{eq:nHat-t} (dashed diagonal) again follows the minimum divisional load; any change in \emph{either} SC population size or the number of compartments leads to an increase in divisional load.
+However, by moving along this line [\eqref{eq:nHat-t}], in particular to higher SC population size and lower number of compartments, the divisional load per TDC can be reduced, as shown in \figref{fig:3-time-Simple}H.
+Therefore, the tissues which minimise TDC divisional load have many SCs and few differentiation steps.
+The optimum SC division rate $\hat{\beta}_1(n)$ is substantially slower than the observed once per year \citep{leesix:Nature:2018}, with SCs dividing twice per lifetime in the optimised tissue.
+
+For a fixed SC population size, the SC division rate is a decreasing function of the number of compartments, such that shorter hierarchies require more input from the SC compartment (\figref{fig:3-time-Simple}F).
+The minimum divisional load occurs when there are enough compartments such that there is no progenitor self-renewal ($\hat{\alpha}(n)=0$), but not too many such that TDCs are not overproduced ($\hat{N}_n = N_n^*$), and when SCs are dividing as slowly as possible [\figref{fig:3-time-Simple}E-H].
+
+
+```{r 3-time-Simple, fig.height = 7, fig.width = 12, fig.cap = caption, fig.pos = "ht"}
+caption <- "Self-renewal probability ($\\hat{\\alpha}(n)$; A), SC division rate ($\\hat{\\beta}_1$; B), TDC population size ($\\hat{N}_n$; C), and cumulative number of divisions per TDC after time $t=\\tau=70$ years ($\\hat{D}_n(t)$; D) as a function of the number of compartments $n$ and SC population size $N_1^*$ for the reduced model.
+These parameters/variables are described by \\eqref{eq:alphabeta}, \\eqref{eq:Nhat-t}, and \\eqref{eq:Dhat-t}.
+Here we have fixed the TDC properties ${\\beta_n = 1/120}$~day\\textsuperscript{$-1$} and ${N_n^* = 10^{13}}$~cells, which are approximate numbers for red blood cells in humans \\citep{nombela:BloodAdv:2017}.
+Horizontal line in A-D is the approximate SC population size in humans ($N_1^* = 10^{5}$~cells; \\citet{leesix:Nature:2018}).
+Diagonal dashed line represents the optimum number of compartments $\\hat{n}$ for a given SC population size which minimises the cumulative number of divisions [\\eqref{eq:nHat-t}].
+The values of $\\hat{\\alpha}(n)$, $\\hat{\\beta}_1(n)$, $\\hat{N}_n$, and $\\hat{D}_n(t)$ along these slices are shown in panels E-H, respectively.
+Colour scales for $\\hat{\\beta}_1(n)$, $\\hat{N}_n$, $\\hat{D}_n(t)$ are truncated for visual clarity."
+
+## Blood system parameters ----
+beta.n <- 1/120 * 365 # yr^-1
+N.n <- 1e13
+n.vals <- seq(5, 45, 1)
+N1.vals <- 10^seq(0,10,0.25) # divisions per year
+base.N1 <- 10^5
+
+t <- 70 # yr
+tau <- 70 # yr
+
+n.opt <- data.frame(
+  N.1 = N1.vals,
+  n = log2(tau * beta.n * N.n / N1.vals) + 1
+)
+
+data.time <- lapply(n.vals, function(n) {
+  lapply(N1.vals, function(N.1) {
+    #' Lagrange multiplier value
+    lambda <- (tau * beta.n * N.n / N.1)^((3-n)/(n-1))
+    
+    #' Optimised alpha values
+    alpha <- min(0.5,max(0,
+                 ((tau * beta.n * N.n / N.1)^(1/(n-1)) - 2) /
+                   (2*(tau * beta.n * N.n / N.1)^(1/(n-1)) - 2)
+    ))
+    
+     #' Optimised beta values
+    beta.1 <- (1/tau) * max(2,((tau * beta.n * N.n / N.1)^(1/(n-1))))
+    
+    #' Cumulative number of divisions
+    Dn <- beta.1 * t + (n-2) * (1/(1 - 2*alpha)) + 1
+
+    #' TDC pop. size
+    Nn <- (beta.1 * N.1 / beta.n) * ((2*(1-alpha)) / (1-2*alpha))^(n-2)
+
+    #' Combine data
+    data.frame(
+      n = n,
+      N.1 = N.1,
+      t = t,
+      tau = tau,
+      lambda = lambda,
+      alpha = alpha,
+      beta.1 = beta.1,
+      Dn = Dn,
+      Nn = Nn
+    )
+  }) %>% bind_rows()
+}) %>% bind_rows()
+
+slice.data <- rbind(
+  lapply(n.vals, function(n) {
+    N.1 <- base.N1
+    
+    lambda <- (tau * beta.n * N.n / N.1)^((3-n)/(n-1))
+    alpha <- min(0.5,max(0,
+                 ((tau * beta.n * N.n / N.1)^(1/(n-1)) - 2) /
+                   (2*(tau * beta.n * N.n / N.1)^(1/(n-1)) - 2)
+    ))
+    beta.1 <- (1/tau) * max(2,((tau * beta.n * N.n / N.1)^(1/(n-1))))
+    Dn <- beta.1 * t + (n-2) * (1/(1 - 2*alpha)) + 1
+    Nn <- (beta.1 * N.1 / beta.n) * ((2*(1-alpha)) / (1-2*alpha))^(n-2)
+    
+    data.frame(
+      n = n,
+      N.1 = N.1,
+      lambda = lambda,
+      alpha = alpha,
+      beta.1 = beta.1,
+      Dn = Dn,
+      Nn = Nn,
+      type = factor("fixed SC pop. size", levels = c("fixed SC pop. size","optimised SC pop. size"))
+    )
+  }) %>% bind_rows(),
+  lapply(n.vals, function(n) {
+    N.1 <- 2^(1-n) * tau * beta.n * N.n
+    #SCflux <- 2^(2-n) * beta.n * N.n
+    
+    lambda <- (tau * beta.n * N.n / N.1)^((3-n)/(n-1))
+    alpha <- min(0.5,max(0,
+                 ((tau * beta.n * N.n / N.1)^(1/(n-1)) - 2) /
+                   (2*(tau * beta.n * N.n / N.1)^(1/(n-1)) - 2)
+    ))
+    beta.1 <- (1/tau) * max(2,((tau * beta.n * N.n / N.1)^(1/(n-1))))
+    Dn <- beta.1 * t + (n-2) * (1/(1 - 2*alpha)) + 1
+    Nn <- (beta.1 * N.1 / beta.n) * ((2*(1-alpha)) / (1-2*alpha))^(n-2)
+    
+    data.frame(
+      n = n,
+      N.1 = N.1,
+      lambda = lambda,
+      alpha = alpha,
+      beta.1 = beta.1,
+      Dn = Dn,
+      Nn = Nn,
+      type = factor("optimised SC pop. size", levels = c("fixed SC pop. size","optimised SC pop. size"))
+    )
+  }) %>% bind_rows()
+)
+
+plot_grid(
+  ggplot(data.time, aes(x = n, y = N.1)) +
+    geom_raster(aes(fill = alpha), interpolate = T) +
+    geom_contour(aes(z = alpha), breaks = seq(0,0.5,0.1) + 1e-4, colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.N1, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(0,0.5),
+                         guide = guide_colourbar(
+                           title = expression("self-renewal" ~ (hat(alpha)(italic(n)))),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC pop. size" ~ (italic(N)[1]))),
+  
+  ggplot(data.time, aes(x = n, y = N.1)) +
+    geom_raster(aes(fill = beta.1), interpolate = T) +
+    geom_contour(aes(z = beta.1), breaks = seq(0,0.3,0.1) + 1e-4, colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.N1, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(0,0.3001),
+                         guide = guide_colourbar(
+                           title = expression("SC division rate" ~ yr^-1 ~ (hat(beta)[1])),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC pop. size" ~ (italic(N)[1]))),
+  
+  ggplot(data.time, aes(x = n, y = N.1)) +
+    geom_raster(aes(fill = log10(Nn)), interpolate = T) +
+    geom_contour(aes(z = log10(Nn)), breaks = seq(13,20) + 1e-2, colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.N1, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(12.95,20),
+                         breaks = seq(13,20,1),
+                         labels = ifelse(seq(13,20,1) %% 2 == 0, "", sciFormat(10^seq(13,20,1))),
+                         guide = guide_colourbar(
+                           title = expression("number of TDCs" ~ (hat(italic(N))[italic(n)])),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC pop. size" ~ (italic(N)[1]))),
+  
+  ggplot(data.time, aes(x = n, y = N.1)) +
+    geom_raster(aes(fill = Dn), interpolate = T) +
+    geom_contour(aes(z = Dn), breaks = seq(0,50,10), colour = "white", size = 0.2) +
+    geom_hline(yintercept = base.N1, colour = "white", linetype = "solid", size = lineSize) +
+    geom_line(data = n.opt, colour = "white", linetype = "dashed", size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
+    scale_fill_viridis_c(limits = c(0,50),
+                         guide = guide_colourbar(
+                           title = expression("divisions per TDC" ~ (hat(italic(D))[n])),
+                           title.position = "top",
+                           barwidth = 10,
+                           title.hjust = 0.5
+                         )
+    ) +
+    plotTheme +
+    theme(legend.position = "top") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC pop. size" ~ (italic(N)[1]))),
+  
+  
+  ggplot(slice.data, aes(x = n, y = alpha, group = type, colour = type)) +
+    geom_vline(xintercept = log2(tau * beta.n * N.n / base.N1) + 1, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_continuous(limits = c(0,0.5)) +
+    scale_linetype_manual(values = c(`fixed SC pop. size` = "solid",`optimised SC pop. size` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC pop. size` = palette_OkabeIto[5],`optimised SC pop. size` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = "none") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("self-renewal" ~ (hat(alpha)(italic(n))))),
+  
+  ggplot(slice.data, aes(x = n, y = beta.1, group = type, colour = type)) +
+    geom_vline(xintercept = log2(tau * beta.n * N.n / base.N1) + 1, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_continuous(limits = c(0,0.3)) +
+    scale_linetype_manual(values = c(`fixed SC pop. size` = "solid",`optimised SC pop. size` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC pop. size` = palette_OkabeIto[5],`optimised SC pop. size` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = "none") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("SC division rate" ~ yr^-1 ~ (hat(beta)[1]))),
+  
+  ggplot(slice.data, aes(x = n, y = Nn, group = type, colour = type)) +
+    geom_vline(xintercept = log2(tau * beta.n * N.n / base.N1) + 1, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_log10(limits = 10^c(12.99,18.01), breaks = 10^seq(13,18), labels = sciFormat) +
+    scale_linetype_manual(values = c(`fixed SC pop. size` = "solid",`optimised SC pop. size` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC pop. size` = palette_OkabeIto[5],`optimised SC pop. size` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = c(0.48,0.88), legend.background = element_blank(), legend.key.width = unit(1.5, "cm")) +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("number of TDCs" ~ (hat(italic(N))[italic(n)]))),
+  
+  ggplot(slice.data, aes(x = n, y = Dn, group = type, colour = type)) +
+    geom_vline(xintercept = log2(tau * beta.n * N.n / base.N1) + 1, linetype = "dotted", colour = "darkgrey") +
+    geom_line(aes(linetype = type), size = lineSize) +
+    scale_x_continuous(expand = c(0,0), limits = range(n.vals)) +
+    scale_y_continuous(limits = c(0,50)) +
+    scale_linetype_manual(values = c(`fixed SC pop. size` = "solid",`optimised SC pop. size` = "dashed"), name = NULL) +
+    scale_colour_manual(values = c(`fixed SC pop. size` = palette_OkabeIto[5],`optimised SC pop. size` = palette_OkabeIto[6]), name = NULL) +
+    plotTheme +
+    theme(legend.position = "none") +
+    labs(x = expression("number of compartments" ~ (italic(n))),
+         y = expression("divisions per TDC" ~ (hat(italic(D))[n]))),
+  
+  align = "v", axis = "lrtb", nrow = 2, labels = "AUTO", rel_heights = c(4,3)
+)
+```
+
+The optimum progenitor self-renewal rate is $\hat{\alpha}(\hat{n})=0$.
+However, the optimum SC division rate $\hat{\beta}_1(\hat{n})$, as well as the optimum number of compartments in the hierarchy, $\hat{n}$, depend on the timescale of optimisation $\tau$.
+As this timescale increases, the optimum SC activity decreases ($\hat{\beta}_1(\hat{n})=2/\tau$; \figref{fig:4-vary-tau}A) and the number of amplification steps required to maintain homeostasis increases ($\hat{n} = \log_2(\tau \beta_n N_n^*/N_1^*) + 1$; \figref{fig:4-vary-tau}B).
+These properties are independent of the lifetime of the individual.
+However, the lifetime $t$ does contribute to the accumulated divisional load [\eqref{eq:Dhat-nhat-t}].
+When we fix $t=\tau$, we have $\hat{D}_{\hat{n}}(\tau) = \hat{n}(\tau) + 1$, which increases logarithmically with $\tau$ (blue line in \figref{fig:4-vary-tau}C).
+If the lifetime $t$ exceeds the optimisation timescale $\tau$ (for example when an individual lives beyond reproductive senescence), then TDCs accumulate additional divisions at a rate of $2/\tau$ per year (the SC division rate).
+For short optimisation timescales $\tau$, this means a rapid accumulation of additional divisions (orange lines in \figref{fig:4-vary-tau}C).
+
+This rapid accumulation of divisions can be seen more clearly by plotting $\hat{D}_{\hat{n}}(t)$ as a function of lifetime $t$ for different optimisation timescales $\tau$ (\figref{fig:5-vary-t}).
+We also see that choosing an optimisation timescale $\tau$ that exceeds the lifetime $t$ results in more accumulated divisions than necessary in early life, due to the increased number of differentiation steps.
+
+```{r 4-vary-tau, fig.height = 12, fig.width = 6, fig.cap = caption, fig.pos = "ht", out.width = "0.5\\textwidth"}
+caption <- "Optimum SC division rate ($\\hat{\\beta}_1$; A), number of compartments ($\\hat{n}$; B) and TDC divisional load ($\\hat{D}_{\\hat{n}}(t)$; C) as functions of the optimisation timescale $\\tau$.
+The optimum self-renewal probability $\\hat{\\alpha}(n)=0$ is not shown.
+Here we have fixed the TDC properties ${\\beta_n = 1/120}$~day\\textsuperscript{$-1$} and ${N_n^* = 10^{13}}$~cells, which are approximate numbers for red blood cells in humans \\citep{nombela:BloodAdv:2017}, as well as the SC population size ${N_1^* = 10^{5}}$~cells \\citep{leesix:Nature:2018}).
+Horizontal line in panel A represents the estimated SC division rate in humans ($\\beta_1 = 1$~yr\\textsuperscript{$-1$}; \\citet{leesix:Nature:2018}).
+Horizontal lines in panels B and C represent the number of compartments and the divisional load when we optimise for divisions accumulated after SC differentiation (i.e. without time)."
+
+## Blood system parameters ----
+beta.n <- 1/120 * 365 # yr^-1
+N.n <- 1e13
+N.1 <- 1e5
+beta.1 <- 1 # yr^-1
+
+
+tau.vals <- 10^seq(0,2,length.out = 101) # yr
+times <- c(1,2,10,40,70) # yr
+
+alpha.noTime <- 0
+beta.noTime <- beta.1
+n.noTime <- log2(beta.n * N.n / (beta.1*N.1)) + 2
+D.noTime <- log2(beta.n * N.n / (beta.1*N.1)) + 1
+
+opt.noTime <- data.frame(
+  variable = factor(c("alpha", "beta", "n", "D"), levels = c("alpha", "beta", "n", "D")),
+  value = c(alpha.noTime, beta.noTime, n.noTime, D.noTime)
+)
+
+opt.vals <- lapply(tau.vals, function(tau) {
+  #' Compartment number for which alpha = 0
+  alpha <- 0
+  beta <- 2/tau
+  n <- log2(tau * beta.n * N.n / N.1) + 1
+  D <- (beta * tau) + n - 1
+  
+  data.frame(
+    tau = tau,
+    t = factor("tau", levels = c("tau",times)),
+    alpha = alpha,
+    beta = beta,
+    n = n,
+    D = D
+  )
+}) %>% bind_rows()
+
+D.time <- lapply(tau.vals, function(tau) {
+  #' Compartment number for which alpha = 0
+  n <- log2(tau * beta.n * N.n / N.1) + 1
+  alpha <- 0
+  beta <- 2/tau
+  D <- (beta * times) + n - 1
+  
+  data.frame(
+    tau = tau,
+    t = factor(times, levels = c("tau",times)),
+    alpha = alpha,
+    beta = beta,
+    n = n,
+    D = D
+  )
+}) %>% bind_rows()
+
+
+all.D <- rbind(
+  opt.vals[,c("tau","t","D")],
+  D.time[,c("tau","t","D")]
+)
+
+
+# opt.vals <- melt(data = opt.vals, id.vars = c("tau"), measure.vars = c("alpha","beta","n","D"))
+# 
+# ggplot(opt.vals[opt.vals$variable != "alpha",], aes(x = tau, y = value)) +
+#   geom_hline(data = opt.noTime[opt.noTime$variable != "alpha",], aes(yintercept = value)) +
+#   geom_line(colour = palette_OkabeIto[8]) +
+#   geom_point(colour = "white", size = 3) +
+#   geom_point(colour = palette_OkabeIto[5]) +
+#   facet_grid(variable ~ ., scales = "free_y") +
+#   scale_x_log10(name = expression("lifetime ("*italic(tau)~ "years)")) +
+#   plotTheme
+
+#' Colours and shapes
+#colours <- c("#000000", palette_OkabeIto[seq_along(time.vals)])
+colours <- c(palette_OkabeIto[5], colorRampPalette(brewer.pal(9, "Oranges")[3:8])(length(times)))
+names(colours) <- levels(all.D$t)
+shapes <- c(16, rep.int(17, times = length(times)))
+names(shapes) <- levels(all.D$t)
+
+#' Label formatting
+t.labs <- paste(ifelse(levels(all.D$t) == "tau", "t = tau", paste("t =", levels(all.D$t), ifelse(levels(all.D$t) == 1, "yr", "yrs"))))
+names(t.labs) <- levels(all.D$t)
+
+
+
+plot_grid(
+  #' SC division rate
+  ggplot(opt.vals, aes(x = tau, y = beta)) +
+    geom_hline(yintercept = beta.noTime) +
+    #geom_line(colour = palette_OkabeIto[8]) +
+    #geom_point(colour = "white", size = 3) +
+    #geom_point(colour = palette_OkabeIto[5]) +
+    geom_line(colour = palette_OkabeIto[5], size = lineSize) +
+    #scale_x_log10() +
+    plotTheme +
+    labs(x = expression("optimisation timescale ("*italic(tau)~ "years)"),
+         y = expression("optimum SC division rate" ~ yr^-1  ~ (italic(hat(beta)[1])(tau)))),
+  
+  #' Number of compartments
+  ggplot(opt.vals, aes(x = tau, y = n)) +
+    geom_hline(yintercept = n.noTime) +
+    #geom_line(colour = palette_OkabeIto[8]) +
+    #geom_point(colour = "white", size = 3) +
+    #geom_point(colour = palette_OkabeIto[5]) +
+    geom_line(colour = palette_OkabeIto[5], size = lineSize) +
+    #scale_x_log10() +
+    plotTheme +
+    labs(x = expression("optimisation timescale ("*italic(tau)~ "years)"),
+         y = expression("optimum number of compartments" ~ (italic(hat(n))(tau)))),
+  
+  #' Number of divisions
+  ggplot(all.D, aes(x = tau, y = D, colour = t, group = t, shape = t)) +
+    geom_hline(yintercept = D.noTime) +
+    #geom_line(colour = palette_OkabeIto[8]) +
+    #geom_point(colour = "white", size = 3) +
+    #geom_point() +
+    geom_line(size = lineSize) +
+    #geom_point(colour = palette_OkabeIto[5]) +
+    #geom_point(data = D.time, aes(colour = t, group = t)) +  
+    #scale_x_log10() +
+    scale_y_continuous(limits = c(28,40), breaks = seq(28,40,2)) +
+    scale_colour_manual(values = colours, labels = t.labs, name = expression("divisions after" ~ italic(t) ~ "years"), guide = guide_legend(ncol = 2, parse = TRUE)) +
+    #scale_shape_manual(values = shapes, labels = t.labs, name = expression("divisions after" ~ italic(t) ~ "years"), guide = guide_legend(ncol = 2, parse = TRUE)) +
+    plotTheme +
+    theme(legend.position = c(0.8,0.2)) +
+    labs(x = expression("optimisation timescale ("*italic(tau)~ "years)"),
+         y = expression("optimum number of divsions" ~ (italic(hat(D)[hat(n)](t))))),
+  
+  ncol = 1, axis = "lr", align = "hv", labels = "AUTO"
+)
+```
+
+```{r 5-vary-t, fig.height = 4, fig.width = 6, fig.cap = caption, fig.pos = "ht", out.width = "0.5\\textwidth"}
+caption <- "Optimum TDC divisional load ($\\hat{D}_{\\hat{n}}(t)$) as a function of lifetime $t$ for various optimisation timescales $\\tau$ (colours).
+Here we have fixed the TDC properties ${\\beta_n = 1/120}$~day\\textsuperscript{$-1$} and ${N_n^* = 10^{13}}$~cells, which are approximate numbers for red blood cells in humans \\citep{nombela:BloodAdv:2017}, as well as the SC population size ${N_1^* = 10^{5}}$~cells \\citep{leesix:Nature:2018}).
+Horizontal line representd the TDC divisional load when we optimise for divisions accumulated after SC differentiation (i.e. without time)."
+
+## Blood system parameters ----
+beta.n <- 1/120 * 365 # yr^-1
+N.n <- 1e13
+N.1 <- 1e5
+beta.1 <- 1 # yr^-1
+
+
+tau.vals <- c(1,2,10,40,70) # yr
+times <- 10^seq(0,2,length.out = 101) # yr
+
+D.noTime <- log2(beta.n * N.n / (beta.1*N.1)) + 1
+
+opt.vals <- lapply(times, function(t) {
+  #' Compartment number for which alpha = 0
+  tau <- t
+  alpha <- 0
+  beta <- 2/tau
+  n <- log2(tau * beta.n * N.n / N.1) + 1
+  D <- (beta * tau) + n - 1
+  
+  data.frame(
+    tau = factor("t", levels = c("t",tau.vals)),
+    t = t,
+    #alpha = alpha,
+    #beta = beta,
+    #n = n,
+    D = D
+  )
+}) %>% bind_rows()
+
+D.vals <- lapply(tau.vals, function(tau) {
+  #' Compartment number for which alpha = 0
+  alpha <- 0
+  beta <- 2/tau
+  n <- log2(tau * beta.n * N.n / N.1) + 1
+  D <- (beta * times) + n - 1
+
+  data.frame(
+    tau = factor(tau, levels = c("t",tau.vals)),
+    t = times,
+    #alpha = alpha,
+    #beta = beta,
+    #n = n,
+    D = D
+  )
+}) %>% bind_rows()
+
+all.D <- rbind(opt.vals, D.vals)
+
+#' Colours and shapes
+colours <- c(palette_OkabeIto[5], colorRampPalette(brewer.pal(9, "RdPu")[3:8])(length(tau.vals)))
+names(colours) <- levels(all.D$tau)
+
+#' Label formatting
+tau.labs <- paste(ifelse(levels(all.D$tau) == "t", "tau = t", paste("tau =", levels(all.D$tau), ifelse(levels(all.D$tau) == 1, "yr", "yrs"))))
+names(tau.labs) <- levels(all.D$tau)
+
+
+ggplot(all.D, aes(x = t, y = D, group = tau, colour = tau)) +
+  geom_hline(yintercept = D.noTime) +
+  #geom_line(colour = palette_OkabeIto[8]) +
+  #geom_point(colour = "white", size = 3) +
+  #geom_point() +
+  geom_line(size = lineSize) +
+  #scale_x_log10() +
+  scale_y_continuous(limits = c(28,40), breaks = seq(28,40,2)) +
+    scale_colour_manual(values = colours, labels = tau.labs, name = expression("optimised for" ~ italic(tau) ~ "years"), guide = guide_legend(ncol = 2, parse = TRUE)) +
+  plotTheme +
+    theme(legend.position = c(0.77,0.2)) +
+    labs(x = expression("lifetime ("*italic(t)~"years)"),
+         y = expression("optimum number of divsions" ~ (italic(hat(D)[hat(n)](t)))))
+```
+
+\clearpage
+
+## Optimised architectures in the full model
+For the full model, including quiescence and asymmetric division, we can repeat the above analyses using the Lagrangian function
+\begin{equation}
+\cL = \sum_{j=2}^{n-1} \left(\frac{2b_j+c_j}{b_j-a_j}-1\right) + 1 - \lambda \left[ \left(\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}\right) - \frac{d_n N^*_n}{(2b_1+c_1) \frac{\gamma}{\ell+\gamma}N^*_{\rm SC}} \right],
+\end{equation}
+for optimising the divisional load after SC differentiation, and
+\begin{equation}
+\cL(t) = (2b_1+c_1)\frac{\gamma}{\ell+\gamma}t + %\sum_{j=2}^{n-1} \left(\frac{2b_j+c_j}{b_j-a_j}-1\right) + 1 - \lambda \left[ \left(\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}\right) - \frac{d_n N^*_n}{(2b_1+c_1) N^*_1} \right],
+\cL,
+\end{equation}
+for optimising divisional load after a lifetime $t$.
+Note that cell death would have to be compensated by additional cell divisions and will result in an increase in the average number of divisions of the surviving cells.
+We have therefore immediately set $d_i=0$ for $1\le i<n$.
+We have also used the condition $a_1=b_1$, which is required for homeostasis.
+
+The optimisation process is described in full in \ref{appendix:optim-Full}.
+From this analysis we find that the ratio
+\begin{equation}
+\phi_i = \frac{2b_i+c_i}{b_i-a_i}
+\end{equation}
+is conserved across all progenitor compartments in optimised tissues, i.e. $\phi_i = \hat{\phi}(n)$ for $1 < i < n$.
+Because of the conditions $b_i-a_i>0$, as well as $a_i \ge 0$, $b_i \ge 0$, and $c_i \ge 0$, this ratio is bounded by $2 \le \hat{\phi}(n) < \infty$.
+When considering only divisions accumulated after SC differentiation (i.e. without time dependence), this ratio takes the value
+\begin{equation}
+\hat{\phi}(n) = \left(\frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}}\right)^{\frac{1}{n-2}},
+\end{equation}
+and the divisional load per TDC is
+\begin{equation}
+\hat{D}_n = (n-2)[\hat{\phi}(n)-1] + 1
+\end{equation}
+This divisional load is minimised when $\hat{\phi}(n)=2$, which can only be achieved if $a_i=c_i=0$, i.e. progenitor cells ($1<i<n$) do not self-renew or divide asymmetrically, they only differentiate.
+This pattern was also described by \citet{derenyi:NatComms:2017}.
+By increasing the SC differentiation flux $(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}$, we can reduce the number of compartments while maintaing the TDC population, hence reducing the divisional load (as described for the reduced model).
+
+When we optimise the tissue architecture based on the total TDC divisional load including SC divisions, we have to include an optimisation timescale $\tau$.
+From our analysis (\ref{appendix:optim-Full}) we find the following relations for the ratio $\hat{\phi}(n)$ and the total SC division rate:
+\begin{equation}
+\hat{\phi}(n) = \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}}, \qquad
+(2b_1+c_1)\frac{\gamma}{\ell+\gamma} = \frac{1}{\tau} \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}},
+\end{equation}
+and the divisional load after a lifetime $t$ satisfies
+\begin{equation}
+\hat{D}_n(t) = (2b_1+c_1)\frac{\gamma}{\ell+\gamma}t + (n-2)[\hat{\phi}(n)-1] + 1.
+\end{equation}
+
+From the relation for the total SC division rate, we observe that there is a trade-off between the division rate of active SCs ($2b_1+c_1$) and the fraction of actively dividing SCs [$\gamma/(\ell+\gamma)$]: If active SCs are dividing faster, then the number of actively dividing cells can be smaller.
+The total SC division rate is bounded by $2/\tau \le (2b_1+c_1)\frac{\gamma}{\ell+\gamma} < \infty$.
+The TDC divisional load is minimised when $\hat{\phi}(n)=2$, $(2b_1+c_1)\frac{\gamma}{\ell+\gamma} = 2/\tau$, and $\hat{n} = \log_2(\tau d_n N_n^*/N_{\rm SC}^*)+1$.
+
+# Discussion
+
+In this study we set out to quantify and then minimise the divisional load that is accumulated in terminally-differentiated cells (TDC) in a homeostatic tissue.
+For insight we focussed on a reduced dynamical model in which a division event either lead to symmetric self-renewal or symmetric differentiation.
+Homeostasis was enforced by constraining the number of progenitor cell compartments (i.e. differentiation steps), self-renewal probabilities per compartment, and division rates per compartment such that the TDC population remains at its steady-state level.
+
+In tissues which minimise the divisional load, we find that the self-renewal probability is constant throughout all progenitor cell compartments.
+The optimum number of compartments is then the smallest number for which progenitor self-renewal can be zero without producing excess TDCs.
+Therefore, the optimum tissue structure which minimises divisional load is a binary division tree.
+By increasing SC turnover, either by increasing SC numbers or SC division rate, the number of progenitor compartments that are required to amplify cell numbers can be reduced and subsequently the divisional load of TDCs is also reduced.
+Therefore, if optimising purely based on divisional load as we have done here, it would make sense to have a high-turnover SC compartment, which is the opposite of what we actually observe in, e.g., the hematopoietic system or colonic crypts.
+Hence, there must be other selection pressures or physiological constraints at play that result in the observed low SC turnover in human tissues.
+
+The above results were obtained based on the divisional load accumulated in the tissue after SC differentiation and in the absence of a time component.
+However, in our model, SCs accumulate divisions linearly with time.
+When including these SC divisions, we find that in the short term it is better to have higher SC turnover and fewer progenitor compartments, but in the long term having more compartments and less SC turnover is optimal.
+Therefore, based on our optimisation criteria, we would expect that in longer lived organisms (with the same homeostatic TDC number) SCs should divide more slowly and there should be a greater number of amplification steps to minimise division accumulation.
+A recent measurement of somatic mutation rate across animals with different lifespans supports this hypothesis, with longer lived animals having a lower rate of somatic mutation accumulation \citep{cagan:bioRxiv:2021}.
+Furthermore, we find that underestimating the timescale of optimisation relative to lifetime leads to a large increase in divisional load at ages beyond the optimisation timescale.
+
+Our full model of cell dynamics also allows asymmetric division, cell death, and SC quiescence.
+Repeating the above analysis, we find that the ratio of differentiation output to net loss in a progenitor compartment is conserved across progenitor compartments in optimised tissues.
+This is a more general principle than derived by \citet{derenyi:NatComms:2017} who found that the ratio of differentiation output between two consecutive progenitor compartments is constant in optimised tissues. 
+Furthermore, the minimum divisional load is achieved when the differentiation output to net loss ratio is equal to two, i.e. when progenitor cells do not self-renew and differentiate only symmetrically.
+This is something that could be compared to empirical data to check for tissue optimisation, if such data existed.
+Finally, from our model and analysis we find that there is a trade-off between the SC division rate and the fraction of quiescent SCs: faster dividing SCs would require a larger quiescent fraction to maintain the minimum divisional load (for a given number of progenitor compartments).
+
+Interestingly, although optimal tissues have a constant self-renewal across progenitor cells, the division rates of the progenitor cells do not affect the divisional load and are thus unconstrained by our optimisation procedure.
+Briefly, the progenitor compartment size $N_i^*$ is inversely proportional to the division rate in that compartment [\eqref{eq:SSi-Reduced}], so the total differentiation flux out of that compartment [$(1-\alpha_i) \beta_i N_i^*$] is independent of $\beta_i$.
+Therefore, the relationship between compartment sizes in these optimised tissues are unconstrained as well: I.e., it is not necessary to have a monotonically increasing compartment size for the tissue to minimise divisional load.
+In optimised tissue structures (binary division trees), we do have a doubling of the flux of cells between consecutive progenitor compartments.
+By assuming a constant division rate across progenitor compartments, we arrive at the doubling of subsequent progenitor compartment sizes in these optimised tissues.
+
+Our conclusions are in agreement with those of \citet{derenyi:NatComms:2017}, despite different optimisation procedures: We both find that hierarchically-organised tissues can be tuned to minimise divisional loads, and therefore limit the occurrence of somatic mutations during homeostasis.
+Beyond \citet{derenyi:NatComms:2017}, we show that the constant ratio of differentiation outputs between subsequent compartments can be generalised further: we find that the ratio of differentiation output to net loss per compartment is conserved across all compartments, which in the absence of asymmetric divisions means that self-renewal probability is constant across all compartments.
+Furthermore, we explore the impacts of varying the optimisation timescale, lifetime, SC numbers, and SC quiescence.
+
+Although the number of divisions itself is an important measure for damage accumulation per cell, it is not the full story in terms of cancer prevention.
+\citet{nowak:PNAS:2003} formalised the concepts put forward by \citet{cairns:Nature:1975} to show that preventing self-renewal in all cells downstream of the SC minimises the rate that mutations fixate in the population.
+This simple so-called "linear model" of somatic evolution corresponds to our optimised binary division tree.
+Later, \citet{pepper:PLOSComputationalBiology:2007} extended the serial differentiation model to include cell compartments (as in our model).
+They showed that non-self-renewing tissue structures can suppress cell level selection and somatic evolution, as serial differentiation makes it possible to segregate proliferative activity and population self-renewal into different cell compartments, such that no compartment possesses all the attributes necessary for somatic evolution.
+Any progenitor self-renewal, including asymmetric divisions, would allow rapid somatic evolution because a mutant clone can sweep to fixation within a population of such cells.
+Therefore, the tissue structures which we find limit the divisional load also limit the rate of somatic evolution.
+
+Recently, \citet{alvarado:PLOSComputationalBiology:2018} utilised an alternative "top-down" modelling approach in which cells that are lost from the TDC compartment are replaced by pulling from the previous compartment (rather than SC division pushing cells into the next compartment).
+They showed that by increasing progenitor self-renewal it becomes unlikely that mutations are acquired in the more primitive compartments, but mutations that do occur take longer to be flushed out of the tissue.
+Overall, large values of progenitor self-renewal result in a smaller number of single-hit mutants across all compartments.
+However, from the point of view of two-hit mutant generation (e.g. the inactivation of a tumour suppressor gene), less progenitor self-renewal is advantageous as the lifetime of the transient cells is shorter, and they therefore have less time to accumulate two mutations.
+This optimal architecture for delaying two-hit mutations corresponds to the binary division tree which limits divisional load.
+Interestingly, \citet{alvarado:PLOSComputationalBiology:2018} found that the arrangement of progenitor compartment sizes influences the total number of mutants and the rate at which two-hit mutants are generated.
+This is seemingly in contrast with our observation that progenitor compartment sizes are essentially a free variable and unconstrained by minimising the divisional load.
+This discrepancy can be explained by the fact that the cell division rates in \citet{alvarado:PLOSComputationalBiology:2018} are determined by a feedback loop and are intrinsically coupled to the self-renewal probabilities.
+
+In our study we have quantified only the mean divisional load per TDC.
+\citet{boettcher:Interface:2018} showed that, based on telomere length distributions, there is significant heterogeneity among divisional loads.
+In their analysis, \citet{boettcher:Interface:2018} showed that not only the mean, but also the variance, increases with increasing progenitor self-renewal, leading to few cells with very high divisional load.
+This again suggests that the non-self-renewing tissue would be the optimum for minimising the probability of a cell evolving an oncogenic phenotype through mutation accumulation.
+
+Our analysis relies on assumptions about the system being in steady state and parameter values being constant (for example, constant HSC activation and deactivation throughout life).
+This, however, is not representative of early development when SCs undergo significant expansion and tissue compartments are populated.
+An expansion phase would require an initially increased SC self-renewal rate to allow the SCs to reach the homeostatic level and to populate the progenitor and TDC compartments. 
+
+With this study we have shown that limiting progenitor self-renewal in hierarchical tissues results in the lowest divisional load during homeostatic tissue maintenance.
+This optimised tissue also satisfies some other somatic evolution constraints put forward by multiple authors.
+Going forward, we would like to bring all of these aspects together to achieve an overall understanding of the selection pressures that act on and shape tissue organisation.
+
+
+\clearpage
+# Appendix {-}
+\setcounter{section}{0}
+\renewcommand{\thesection}{Appendix~\Roman{section}}
+
+# Counting divisions in the reduced model {#appendix:divLoad-Reduced}
+
+## Total divisional load {-}
+We here recall the argument of \citet{derenyi:NatComms:2017}, which we apply to our reduced hierarchical population model.
+To this end, let $T_i$ be the cumulative total of cell divisions that all of the cells in compartment $i$ have undergone.
+Each individual division event modifies the $T_i$, so we want to construct an equation for this quantity:
+\begin{enumerate}
+\item Following a self-renewal event in compartment $i$, which occurs at a rate $\alpha_i\beta_i$ per cell, the division total in compartment $i$ increases.
+The mother cell had accumulated, on average, $T_i/N^*$, and then generated two daughter cells with $T_i/N^* + 1$ divisions each.
+Therefore, the increase in $T_i$ per self-renewal event is $T_i/N^*_i + 2$;
+%
+\item Following a differentiation event in compartment $i-1$, which occurs at a rate $(1-\alpha_{i-1})\beta_{i-1}$ per cell, the division total of compartment $i-1$ decreases (on average) by $T_{i-1}/N^*_{i-1}$.
+Meanwhile, the division total in compartment $i$ increases by $2(T_{i-1}/N^*_{i-1} + 1)$, where the factor two reflects the fact that two differentiated daughters are generated per event.
+\end{enumerate}
+Combining these events, we have the following ODE for the cumulative number of divisions of all cells in compartment $i$:
+\begin{equation}
+\begin{aligned}
+\dot{T}_i &= \alpha_i\beta_i N^*_i \left[\frac{T_i}{N^*_i}+2\right]
+- (1-\alpha_i)\beta_i N^*_i \left[\frac{T_i}{N^*_i}\right]
++ (1-\alpha_{i-1})\beta_{i-1} N^*_{i-1} \left[2\left(\frac{T_{i-1}}{N^*_{i-1}}+1\right)\right] \\
+%
+&= 2(1-\alpha_{i-1})\beta_{i-1} N^*_{i-1} + 2\alpha_i\beta_i N^*_i + 2(1-\alpha_{i-1})\beta_{i-1} N^*_{i-1} \frac{T_{i-1}}{N^*_{i-1}} - (1 - 2\alpha_i)\beta_i N^*_i \frac{T_i}{N^*_i}.
+\end{aligned}
+\end{equation}
+Using the steady-state relation $(1-2\alpha_i) \beta_i N^*_i = 2 (1-\alpha_{i-1})\beta_{i-1} N^*_{i-1}$ [\eqref{eq:SS-Reduced} in the main text], we recover
+\begin{equation}
+\begin{aligned}
+\dot{T}_i &= (1-2\alpha_i) \beta_i N^*_i + 2\alpha_i\beta_i N^*_i + (1-2\alpha_i) \beta_i N^*_i\frac{T_{i-1}}{N^*_{i-1}} - (1 - 2\alpha_i)\beta_i N^*_i \frac{T_i}{N^*_i} \\
+&= \beta_i N^*_i - (1 - 2\alpha_i)\beta_i N^*_i \left( \frac{T_i}{N^*_i} - \frac{T_{i-1}}{N^*_{i-1}}\right).
+\end{aligned}
+\end{equation}
+Now writing $D_i = T_i/N^*_i$ for the average number of divisions per cell in compartment $i$, we have the equation
+\begin{equation}
+\dot{D}_i = \beta_i \bigl[ 1 - (1 - 2\alpha_i)(D_i-D_{i-1})\bigr],
+\label{eq:divTotalODE-Reduced}
+\end{equation}
+which we can solve recursively.
+For $i=1$, we have (using $\alpha_1=0.5$)
+\begin{equation}
+D_1(t) = \beta_1 t,
+\end{equation}
+i.e. stem cells accumulate divisions linearly with time.
+
+For the average number of divisions beyond the stem cells, we can look at the steady state of \eqref{eq:divTotalODE-Reduced} and set $D_1=0$.
+From this steady state we have
+\begin{equation}
+D_i = D_{i-1} + \frac{1}{1-2\alpha_i} = \sum_{j=2}^i \frac{1}{1-2\alpha_j}.
+\label{eq:divTotalNumber-Reduced}
+\end{equation}
+
+
+## Tracking divisions with subpopulations {-}
+The number of divisions that a cell goes through can also be computed according to the method of \citet{boettcher:Interface:2018}.
+In summary, the number of cells in compartment $i$ that have undergone $j$ cell divisions follows the ODE
+\begin{equation}
+\dot{N}_i^{(j)} = 2(1-\alpha_{i-1})\beta_{i-1}N_{i-1}^{(j-1)} + 2 \alpha_i \beta_i N_i^{(j-1)} - \beta_i N_i^{(j)},
+\label{eq:divSubpopODE-Reduced}
+\end{equation}
+where the three terms correspond to differentiation into compartment $i$ from $i-1$, self-renewal within compartment $i$, and the division of cells which have already accumulated $j$ divisions in compartment $i$.
+To compute the number of divisions a cell undergoes in addition to those in the stem cell compartment ($i=1$) we set $N_1^{(j)} = N_1^* \delta_{j,0}$, where $\delta_{j,0}$ is the Kroenecker-$\delta$, which has value one if $j=0$ and zero otherwise.
+We then look at the steady state of \eqref{eq:divSubpopODE-Reduced}, i.e.
+\begin{equation}
+N_i^{(j)*} = \frac{2(1-\alpha_{i-1}) \beta_{i-1} N_{i-1}^{(j-1)*}}{\beta_i} +  2 \alpha_i N_i^{(j-1)*}.
+\end{equation}
+Using the steady-state relationship $(1-2\alpha_i) \beta_i N^*_i = 2 (1-\alpha_{i-1})\beta_{i-1} N^*_{i-1}$ [\eqref{eq:SS-Reduced} in the main text], and defining ${x_i^{(j)} = N_i^{(j)*}/N_i^*}$ (i.e. the fraction of cells in compartment $i$ that have undergone $j$ divisions), we have
+\begin{equation}
+x_i^{(j)} = \left\{ \begin{matrix}
+\delta_{j,0} & \mbox{for~} i = 1, \\
+x_{i-1}^{(j-1)} + 2\alpha_i \left( x_i^{(j-1)} - x_{i-1}^{(j-1)} \right) & \mbox{for~} i>1.
+\end{matrix} \right.
+\end{equation}
+From this, we can compute the mean number of divisions per compartment ($D_i = \sum_j j x_i^{(j)}$) which gives
+\begin{equation}
+D_i = \sum_{j=2}^i \frac{1}{1-2\alpha_j}.
+\end{equation}
+This is identical to \eqref{eq:divTotalNumber-Reduced}.
+
+
+# Counting divisions in the full model {#appendix:divLoad-Full}
+
+## Total divisional load {-}
+We here again recall the argument of \citet{derenyi:NatComms:2017}, which we apply to our full hierarchical population model.
+To this end, let $T_i$ be the cumulative total of cell divisions that all of the cells in compartment $i$ have undergone.
+The individual events modify the $T_i$, so we want to construct an equation for this quantity.
+Firstly, for the cumulative number of divisions of cells in the quiescent compartment $i=0$ we have
+\begin{equation}
+\dot{T}_0 = -\gamma N^*_0 \left[\frac{T_0}{N^*_0}\right] + \ell N^*_1 \left[\frac{T_1}{N^*_1}\right].
+\end{equation}
+Cells in the active stem cell compartment $i=1$ can move to and from the quiescent compartment, but can also increase the number of divisions through self-renewal and asymmetric divisions and decrease the number of divisions through differentiation and death.
+We therefore have
+\begin{equation}
+\dot{T}_1 = \gamma N^*_0 \left[\frac{T_0}{N^*_0}\right] - \ell N^*_1 \left[\frac{T_1}{N^*_1}\right] + a_1 N^*_1\left[\frac{T_1}{N^*_1} + 2\right] + c_1 N^*_1 [1] - (b_1 + d_1) N^*_1 \left[\frac{T_1}{N^*_1}\right].
+\end{equation}
+For cells in compartments $2 \le i < n$ we have the following events which can modify the cumulative number of divisions per compartment:
+\begin{enumerate}
+\item Following a symmetric self-renewal event in compartment $i$, which occurs at a rate $a_i$ per cell, the division total in compartment $i$ increases.
+The mother had accumulated, on average, $T_i/N^*$, and then generated two daughter cells with $T_i/N^* + 1$ divisions each.
+Therefore, the increase in $T_i$ per self-renewal event is $T_i/N^*_i + 2$.
+%
+\item Following a symmetric differentiation event in compartment $i-1$, which occurs at a rate $b_{i-1}$ per cell, the division total of compartment $i-1$ decreases (on average) by $T_{i-1}/N^*_{i-1}$.
+Meanwhile, the division total in compartment $i$ increases by $2(T_{i-1}/N^*_{i-1} + 1)$, where the factor two reflects the fact that two differentiated daughters are generated per event.
+%
+\item Following an asymmetric division event in compartment $i$, which occurs at a rate $c_i$ per cell, the division total in compartment $i$ increases by one, and the division total in compartment $i+1$ increases (on average) by $T_i/N^*_i + 1$.
+%
+\item Finally, a death event in compartment $i$ occurs at a rate $d_i$ per cell and removes (on average) $T_i/N^*_i$ cumulative divisions from that compartment.
+\end{enumerate}
+Combining these events, we have the following ODE for the cumulative number of divisions of cells in compartment $2 \le i < n$:
+\begin{equation}
+\small
+\begin{aligned}
+\dot{T}_i &=
+a_i N^*_i \left[\frac{T_i}{N^*_i}+2\right]
++ b_{i-1} N^*_{i-1} \left[2\left(\frac{T_{i-1}}{N^*_{i-1}}+1\right)\right]
++ c_i N^*_i [1] + c_{i-1} N^*_{i-1} \left[\frac{T_{i-1}}{N^*_{i-1}}+1\right]
+- (b_i+d_i) N^*_i \left[\frac{T_i}{N^*_i}\right] \\
+%
+&= (2b_{i-1}+c_{i-1}) N^*_{i-1} + (2a_i+c_i) N^*_i
++ (2b_{i-1}+c_{i-1}) N^*_{i-1} \frac{T_{i-1}}{N^*_{i-1}}
++ (a_i - b_i - d_i) N^*_i \frac{T_i}{N^*_i}.
+\end{aligned}
+\end{equation}
+Using the steady-state relation $(b_i + d_i - a_i) N^*_i = (2b_{i-1} + c_{i-1})N^*_{i-1}$ [\eqref{eq:SS-Full} in the main text], we recover
+\begin{equation}
+\begin{aligned}
+\dot{T}_i &=
+(b_i + d_i - a_i) N^*_i + (2a_i+c_i) N^*_i
++ (b_i + d_i - a_i) N^*_i \frac{T_{i-1}}{N^*_{i-1}}
++ (a_i - b_i - d_i) N^*_i \frac{T_i}{N^*_i} \\
+&= (a_i+b_i+c_i+d_i) N^*_i - (b_i + d_i - a_i)N^*_i \left( \frac{T_i}{N^*_i} - \frac{T_{i-1}}{N^*_{i-1}}\right).
+\end{aligned}
+\end{equation}
+Now writing $D_i = T_i/N^*_i$ for the average number of divisions per cell in compartment $i$, we have the equations
+\begin{equation}
+\begin{aligned}
+\dot{D}_0 &= -\gamma(D_0 - D_1), \\
+\dot{D}_1 &= \ell(D_0 - D_1) + (2a_1+c_1), \\
+\dot{D}_i &= (a_i+b_i+c_i+d_i) - (b_i + d_i - a_i)(D_i-D_{i-1}),
+\end{aligned}
+\label{eq:divTotalODE-Full}%
+\end{equation}
+where we have used $a_1 = b_1 + d_1$ and $\gamma N^*_0 = \ell N^*_1$.
+The ODEs for $D_0$ and $D_1$ can be solved together [with $D_0(0) = D_1(0) = 0$] to give
+\begin{equation}
+\begin{aligned}
+D_0(t) &= \frac{2a_1+c_1}{\ell+\gamma} \frac{\gamma}{\ell+\gamma} \left[(\ell+\gamma)t + e^{-(\ell+\gamma)t}-1\right], \\
+D_1(t) &= \frac{2a_1+c_1}{\ell+\gamma} \frac{\ell}{\ell+\gamma} \left[\frac{\gamma}{\ell}(\ell+\gamma)t - e^{-(\ell+\gamma)t}+1\right], \\
+\Rightarrow \qquad D_{\rm SC}(t) &= \frac{\ell}{\ell+\gamma}D_0(t) + \frac{\gamma}{\ell+\gamma}D_1(t) = (2a_1+c_1)\frac{\gamma}{\ell+\gamma}t,
+\end{aligned}
+\end{equation}
+where $D_{\rm SC}(t)$ is the average number of divisions per stem cell across the active or quiescent stem cells.
+For the average number of divisions beyond the stem cells, we can look at the steady state of \eqref{eq:divTotalODE-Full} and set $D_1=0$.
+From this steady state we have
+\begin{equation}
+D_i = D_{i-1} + \frac{a_i+b_i+c_i+d_i}{b_i + d_i - a_i} = \sum_{j=2}^i \frac{a_j+b_j+c_j+d_j}{b_j + d_j - a_j}.
+\label{eq:divTotalNumber-Full}
+\end{equation}
+
+
+## Tracking divisions with subpopulations {-}
+The number of divisions a cell goes through can also be computed according to the method of \citet{boettcher:Interface:2018}.
+In summary, the number of cells in compartment $i$ that have undergone $j$ cell divisions follow the ODEs
+\begin{equation}
+\begin{aligned}
+\dot{N}_0^{(j)} &= -\gamma N_0^{(j)} + \ell N_1^{(j)}, \\
+\dot{N}_1^{(j)} &= \gamma N_0^{(j)} - \ell N_1^{(j)}
++ (2a_1+c_1) N_1^{(j-1)} - (a_1+b_1+c_1+d_1) N_1^{(j)}, \\
+\dot{N}_i^{(j)} &= (2b_{i-1} + c_{i-1})N_{i-1}^{(j-1)} + (2a_i + c_i) N_i^{(j-1)} - (a_i+b_i+c_i+d_i) N_i^{(j)}.
+\end{aligned}
+\label{eq:divSubpopODE-Full}%
+\end{equation}
+
+For the stem cells we define $x_0 = \sum_j j N_0^{(j)} / N^*_0$ and $x_1 = \sum_j j N_1^{(j)} / N^*_1$ as the mean number of divisions per cell in the quiescent and active compartment.
+These variables then follow the ODEs
+\begin{equation}
+\begin{aligned}
+\dot{x}_0 &= -\gamma (x_0 - x_1), \\
+\dot{x}_1 &= \ell (x_0 - x_1) + (2a_1+c_1),
+\end{aligned}
+\end{equation}
+where we have used $\gamma N^*_0 = \ell N^*_1$ and $a_1 = b_1 + d_1$.
+These ODEs can be solved together [with $x_0(0) = x_1(0) = 0$] to give
+\begin{align}
+x_0(t) &= \frac{2a_1+c_1}{\ell+\gamma} \frac{\gamma}{\ell+\gamma} \left[(\ell+\gamma)t + e^{-(\ell+\gamma)t}-1\right], \nonumber\\
+x_1(t) &= \frac{2a_1+c_1}{\ell+\gamma} \frac{\ell}{\ell+\gamma} \left[\frac{\gamma}{\ell}(\ell+\gamma)t - e^{-(\ell+\gamma)t}+1\right], \nonumber\\
+\Rightarrow \qquad x_{\rm SC}(t) &= \frac{\ell}{\ell+\gamma}D_0(t) + \frac{\gamma}{\ell+\gamma}D_1(t) = (2a_1+c_1)\frac{\gamma}{\ell+\gamma}t,
+\end{align}
+where $x_{\rm SC}(t)$ is the average number of divisions per stem cell ignoring the active or quiescent status.
+
+To compute the number of divisions a cell undergoes in addition to those in the stem cell compartments we set $N_1^{(j)} = N_1^* \delta_{j,0}$.
+We then look at the steady state of \eqref{eq:divSubpopODE-Full}, i.e.
+\begin{equation}
+N_i^{(j)*} = \frac{(2b_{i-1} + c_{i-1}) N_{i-1}^{(j-1)*} + (2a_i+c_i)N_i^{(j-1)*}}{a_i+b_i+c_i+d_i}.
+\end{equation}
+Using the steady-state relation $(b_i + d_i - a_i) N^*_i = (2b_{i-1} + c_{i-1})N^*_{i-1}$ [\eqref{eq:SS-Full} in the main text], and defining ${x_i^{(j)} = N_i^{(j)*}/N_i^*}$ (i.e. the fraction of cells of type $i$ that have undergone $j$ divisions), we have
+\begin{equation}
+x_i^{(j)} = \left\{ \begin{matrix}
+\delta_{j,0} & \mbox{for~} i = 1, \\
+\dfrac{(b_i+d_i-a_i)x_{i-1}^{(j-1)} + (2a_i+c_i)x_i^{(j-1)}}{a_i+b_i+c_i+d_i} & \mbox{for~} i>1.
+\end{matrix} \right.
+\end{equation}
+From this, we can compute the mean number of divisions per compartment [$D_i = \sum_j j x_i^{(j)}$] which gives
+\begin{equation}
+D_i = \sum_{j=2}^i \frac{a_j+b_j+c_j+d_j}{b_j+d_j-a_j}.
+\end{equation}
+This is identical to \eqref{eq:divTotalNumber-Full}.
+
+
+# Tissue optimisation in the reduced model {#appendix:optim-Reduced}
+
+## Minimizing additional divisions after stem cell differentiation {-}
+Here we optimise the number of divisions that TDCs accumulate after leaving the SC compartment.
+From \eqref{eq:divTotalNumber-Reduced}, the number of divisions post SC differentiation is
+\begin{equation}
+D_n = \sum_{j=2}^n \frac{1}{1-2\alpha_j}.
+\label{eq:app:Dn-simple}
+\end{equation}
+Concretely, we want to solve
+\begin{equation}
+\argmin_{n, \{\alpha_i\}, \beta_1, N^*_1}~\sum_{j=2}^n \frac{1}{1-2\alpha_j} \quad\text{s.t.}\quad \beta_n N^*_n = \beta_1 \left[\prod_{k=2}^{n-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_k} \right]N^*_1.
+\end{equation}
+As the parameters $\beta_1$ and $N^*_1$ do not appear in the objective function (only in the constraint), they cannot be optimised here.
+Furthermore, the number of compartments $n$ will be optimised through graphical methods due to its discrete nature.
+Hence, we first identify the parameter set $\{\alpha_i\}_{1 < i < n}$ which minimises the number of divisions.
+
+Following the method of Lagrange, we find the stationary points of the function
+\begin{equation}
+\cL = \sum_{j=2}^n \frac{1}{1-2\alpha_j} - \lambda \left[\prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N^*_n}{\beta_1 N^*_1} \right],
+\end{equation}
+which combines the cumulative number of divisions with the population size constraint.
+The coefficient $\lambda$ is the Lagrange multiplier, which is to be determined.
+The stationary points of the Lagrangian function are found by solving $\partial \cL / \partial \alpha_i = 0$ and $\partial \cL / \partial \lambda = 0$.
+From the first set of partial derivatives, we arrive at
+\begin{equation}
+\begin{aligned}
+\frac{\partial \cL}{\partial \alpha_i} &= \frac{2}{(1-2\alpha_i)^2} -\frac{\lambda}{(1-\alpha_i)(1-2\alpha_i)} \prod_{k=2}^{n-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_k} = 0 \\
+&\Rightarrow \quad \frac{2(1-\alpha_i)}{1-2\alpha_i} = \lambda \prod_{k=2}^{n-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_k}.
+\end{aligned}
+\end{equation}
+We can also write this as
+\begin{equation}
+y_i = \lambda \prod_{k=2}^{n-1} y_k  \qquad\text{where}~ y_i = \frac{2(1-\alpha_i)}{1-2\alpha_i}  ~\text{or}~ \alpha_i = \frac{y_i-2}{2y_i-2},
+\end{equation}
+from which we see that all $y_i$ are equal (for $1<i<n$).
+Solving this equation, we therefore have
+\begin{equation}
+y_i = y(\lambda) = \lambda^{\frac{1}{3-n}}.
+\end{equation}
+The value of $\lambda$ is obtained from the $\partial \cL / \partial \lambda = 0$ equation, i.e. the population size constraint:
+\begin{equation}
+\begin{aligned}
+\frac{\partial \cL}{\partial \lambda} &= \prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N^*_n}{\beta_1 N^*_1} = 0 \\
+&\Rightarrow \quad \prod_{k=2}^{n-1} y(\lambda) = \frac{\beta_n N^*_n}{\beta_1 N^*_1} \\
+&\Rightarrow \quad \lambda^{\frac{n-2}{3-n}} = \frac{\beta_n N^*_n}{\beta_1 N^*_1} \\
+&\Rightarrow \quad \lambda = \left(\frac{\beta_n N^*_n}{\beta_1 N^*_1}\right)^\frac{3-n}{n-2}.
+\end{aligned}
+\end{equation}
+Hence the values of $\alpha_i$ for the $n$-compartment model are given as
+\begin{equation}
+\alpha_i = \hat{\alpha}(n) = \frac{y(\lambda)-2}{2y(\lambda)-2} = \frac{ \left(\frac{\beta_n N^*_n}{\beta_1 N^*_1}\right)^\frac{1}{n-2} - 2}{ 2 \left(\frac{\beta_n N^*_n}{\beta_1 N^*_1}\right)^\frac{1}{n-2} - 2}.
+\label{eq:alphaHat}
+\end{equation}
+Inserting this value of $\hat{\alpha}$ into the expression for the number of divisions per TDC after SC differentiation [\eqref{eq:app:Dn-simple}], we arrive at
+\begin{equation}
+\begin{aligned}
+\hat{D}_n &= \sum_{j=2}^n \frac{1}{1-2\alpha_j} \\
+&= \sum_{j=2}^{n-1} \frac{1}{1-2\hat{\alpha}(n)} + 1 \\
+&= (n-2)\frac{1}{1-2\hat{\alpha}(n)} + 1 \\
+%&= (n-2)\left[ \left(\frac{\beta_n N^*_n}{\beta_1 N^*_1}\right)^\frac{1}{n-2}-1\right] + 1 \\
+&= (n-2)\left(\frac{\beta_n N^*_n}{\beta_1 N^*_1}\right)^\frac{1}{n-2} + (3-n).
+\end{aligned}
+\end{equation}
+
+Finally, we note that $\hat{\alpha}(n)$ has to bounded below by zero ($\hat{\alpha} \ge 0$).
+This value is achieved when $(\beta_n N^*_n/\beta_1 N^*_1)^\frac{1}{n-2} = 2$ [see \eqref{eq:alphaHat}], or when
+\begin{equation}
+\hat{n} = \log_2\left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right) + 2.
+\end{equation}
+Through graphical methods, we show that $\hat{n}$ is the optimum number of compartments to minimise the divisional load, where we have $\hat{D}_{\hat{n}} = \log_2(\beta_n N^*_n / \beta_1 N^*_1) + 1 = \hat{n}-1$.
+
+## Minimizing cumulative divisions after lifetime $t$ {-}
+For the number of divisions accumulated after a lifetime $t$, we use the assumption that SC divisions occur much more slowly than non-SCs, such that the number of divisions per TDC at time $t$ is approximated by the number of SC divisions at time $t$ plus the number of divisions accumulated after SC differentiation.
+I.e. the number of divisions per TDC at time $t$ is
+\begin{equation}
+D_n(t) = \beta_1 t + \sum_{j=2}^n \frac{1}{1-2\alpha_j}.
+\label{eq:app:Dn-t-simple}
+\end{equation}
+Here we optimise the number of divisions that TDCs will have accumulated after SCs have been dividing for time period $\tau$.
+Note that $\tau$ is the timescale of optimisation, but the lifetime $t$ may be longer or shorter than $\tau$.
+Concretely, we want to solve
+\begin{equation}
+\argmin_{n, \{\alpha_i\}, \beta_1, N^*_1} \left(\beta_1 \tau + \sum_{j=2}^n \frac{1}{1-2\alpha_j}\right) \quad\text{s.t.}\quad \beta_n N^*_n = \beta_1 \left[\prod_{k=2}^{n-1} \frac{2(1 - \alpha_k)}{1 - 2\alpha_k} \right]N^*_1.
+\end{equation}
+The number of stem cells, $N^*_1$, does not appear in the objective function (only in the constraint) and cannot be optimised here.
+Furthermore, the number of compartments $n$ will be optimised through graphical methods due to its discrete nature.
+Hence, we first identify the parameter set $\{\alpha_i\}_{1<i<n}$ and $\beta_1$ which minimise the divisional load.
+
+Following the method of Lagrange, we find the stationary points of the function
+\begin{equation}
+\cL(\tau) = \beta_1 \tau + \sum_{j=2}^n \frac{1}{1-2\alpha_j} - \lambda \left[\prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N^*_n}{\beta_1 N^*_1} \right],
+\end{equation}
+which combines the cumulative number of divisions per TDC with the population size constraint.
+The stationary points of the Lagrangian function are found by solving $\partial \cL(\tau) / \partial \alpha_i = 0$, $\partial \cL(\tau) / \partial \beta_1 = 0$, and $\partial \cL(\tau) / \partial \lambda = 0$.
+
+The partial derivatives with respect to $\alpha_i$ are equivalent to the previous section, such that we arrive at
+\begin{equation}
+\frac{2(1-\alpha_i)}{1-2\alpha_i} = \lambda^{\frac{1}{3-n}}.
+\end{equation}
+For the partial derivative with respect to $\beta_1$, we arrive at
+\begin{equation}
+\begin{aligned}
+\frac{\partial\cL(\tau)}{\partial\beta_1} &= \tau - \lambda \frac{\beta_n N_n^*}{\beta_1^2 N_1^*} = 0 \\
+&\Rightarrow \quad \beta_1 = \sqrt{\frac{\lambda}{\tau}\frac{\beta_n N_n^*}{N_1^*}}.
+\end{aligned}
+\end{equation}
+The value of $\lambda$ is obtained from the $\partial \cL(\tau) / \partial \lambda = 0$ equation, i.e. the population size constraint:
+\begin{equation}
+\begin{aligned}
+\frac{\partial \cL}{\partial \lambda} &= \prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} - \frac{\beta_n N^*_n}{\beta_1 N^*_1} = 0 \\
+&\Rightarrow \quad \prod_{k=2}^{n-1} \frac{2(1-\alpha_k)}{1-2\alpha_k} = \frac{\beta_n N^*_n}{\beta_1 N^*_1} \\
+&\Rightarrow \quad \lambda^{\frac{n-2}{3-n}} = \sqrt{\frac{\tau}{\lambda}\frac{\beta_n N^*_n}{N^*_1}} \\
+&\Rightarrow \quad \lambda = \left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{3-n}{n-1}.
+\end{aligned}
+\end{equation}
+Hence the optimum values of $\alpha_i$ and $\beta_1$ are given as
+\begin{equation}
+\alpha_i = \hat{\alpha}(n) = \frac{\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{1}{n-1} - 2}{2\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{1}{n-1} - 2}, \quad
+\hat{\beta}_1(n) = \frac{1}{\tau}\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^{\frac{1}{n-1}}
+\label{eq:alphaHat-betaHat-tau}
+\end{equation}
+
+
+Inserting these values of $\hat{\alpha}(n)$ and $\hat{\beta}_1(n)$ into the expression for the number of divisions per TDC after a lifetime $t$ [\eqref{eq:app:Dn-t-simple}], we arrive at
+\begin{equation}
+\begin{aligned}
+\hat{D}_n(t) &= \hat{\beta}_1(n) t + \sum_{j=2}^{n-1} \frac{1}{1-2\hat{\alpha}(n)} + 1\\
+&= \frac{t}{\tau} \left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^{\frac{1}{n-1}} + (n-2)\left[\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^{\frac{1}{n-1}} - 1\right] + 1 \\
+&= \left(\frac{t}{\tau}+n-2\right)\left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^{\frac{1}{n-1}} + (3-n).
+\end{aligned}
+\end{equation}
+
+Finally, we note that $\hat{\alpha}(n)$ has to bounded below by zero ($\hat{\alpha}(n) \ge 0$).
+This value is achieved when $(\tau \beta_n N^*_n/N^*_1)^\frac{1}{n-1} = 2$ [see \eqref{eq:alphaHat-betaHat-tau}], or when
+\begin{equation}
+n = \hat{n} = \log_2\left(\frac{\tau \beta_n N_n^*}{N_1^*}\right) + 1.
+\end{equation}
+
+
+# Tissue optimisation in the full model {#appendix:optim-Full}
+
+## Minimizing additional divisions after stem cell differentiation {-}
+We can repeat the above analysis for the full model, where we want to minimise the number of divisions accumulated by a TDC after leaving the stem cell compartment, i.e. \eqref{eq:divTotalNumber-Full}.
+We first note that cell death would have to be compensated by additional cell divisions and will result in an increase in the average number of divisions of the surviving cells.
+We can therefore immediately set $d_i=0$ for $1\le i<n$.
+We now want to find the stationary points of the Lagrangian function
+\begin{equation}
+\cL = \sum_{j=2}^{n-1} \frac{a_j+b_j+c_j}{b_j-a_j} + 1 - \lambda \left[ \left(\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}\right) - \frac{d_n N^*_n}{(2b_1+c_1) \frac{\gamma}{\ell+\gamma} N^*_{\rm SC}} \right],
+\label{eq:lagrange-Full}
+\end{equation}
+where we have used the expression for the steady-state population size from \eqref{eq:SSn-Full} in the main text to derive the constraint for the number of TDCs.
+As the parameters $b_1$ ($=a_1$), $c_1$, $\gamma$, $\ell$, and $N^*_{\rm SC}$ do not appear in the objective function (only in the constraint), they cannot be optimised here.
+Furthermore, the number of compartments $n$ will be optimised through graphical methods due to its discrete nature.
+
+Finding the stationary points of \eqref{eq:lagrange-Full} is achieved by setting the derivatives $\partial\cL/\partial p_i$ ($p \in \left\{a,b,c\right\}$; $1 < i < n$) and $\partial\cL/\partial\lambda$ equal to zero.
+These derivatives satisfy:
+\begin{equation}
+\begin{aligned}
+\frac{\partial \cL}{\partial a_i} &= \frac{2b_i+c_i}{(b_i-a_i)^2} - \frac{\lambda}{b_i-a_i} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, \\
+%
+\frac{\partial \cL}{\partial b_i} &= -\frac{2a_i+c_i}{(b_i-a_i)^2} + \lambda\frac{2a_i+c_i}{(2b_i+c_i)(b_i-a_i)} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, \\
+%
+\frac{\partial \cL}{\partial c_i} &= \frac{1}{b_i-a_i} - \frac{\lambda}{2b_i+c_i} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, \\
+%
+\frac{\partial \cL}{\partial \lambda} &= -\left(\prod_{k=2}^{n-1} \frac{2b_k + c_k}{b_k-a_k}\right) + \frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}},
+\end{aligned}
+\end{equation}
+and hence we arrive at the four conditions:
+\begin{equation}
+\begin{aligned}
+\frac{\partial \cL}{\partial a_i} = 0 \quad &\Rightarrow \quad \frac{2b_i+c_i}{b_i-a_i} = \lambda \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, && {\rm (i)}\\
+%
+\frac{\partial \cL}{\partial b_i} = 0 \quad &\Rightarrow \quad \frac{2a_i+c_i}{b_i-a_i} = \lambda \frac{2a_i+c_i}{2b_i+c_i} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, && {\rm (ii)}\\
+%
+\frac{\partial \cL}{\partial c_i} = 0 \quad &\Rightarrow \quad \frac{2b_i+c_i}{b_i-a_i} = \lambda \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, && {\rm (iii)}\\
+%
+\frac{\partial \cL}{\partial \lambda} = 0 \quad &\Rightarrow \quad \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k} = \frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}} && {\rm (iv)}.
+\end{aligned}
+\label{eq:conditions-Full}
+\end{equation}
+We have used the condition $b_i-a_i>0$ (for $1 < i < n$) above.
+We have also had to impose $2b_i+c_i>0$, which follows from the fact that we must have some differentiation flux from compartment $i$ to $i+1$ and therefore requires the condition $b_i+c_i>0$ (as well as $b_i \ge 0$ and $c_i \ge 0$ by definition).
+The term $2a_i+c_i \ge 0$ can be zero iff $a_i=0$ and $c_i=0$, so we cannot divide by this term in general.
+The conditions (i) and (iii) above are equivalent, and condition (ii) can be shown to be consistent with (i) and (iii) by replacing the $2b_i+c_i$ with this value as defined by condition (i).
+
+Ultimately, the conditions (i)-(iii) in \eqref{eq:conditions-Full} can be reduced to
+\begin{equation}
+\phi_i = \lambda \prod_{k=2}^{n-1} \phi_k \quad \mbox{where} \quad \phi_i = \frac{2b_i+c_i}{b_i-a_i},
+\end{equation}
+and hence the ratios $\phi_i$ are conserved across compartments $1<i<n$:
+\begin{equation}
+\frac{2b_i+c_i}{b_i-a_i} = \phi_i = \hat{\phi} = \lambda^{\frac{1}{3-n}}.
+\end{equation}
+The value of $\lambda$ is defined by condition (iv) in \eqref{eq:conditions-Full}, 
+\begin{equation}
+\begin{aligned}
+\frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}} &= \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k} = \prod_{k=2}^{n-1} \phi_k = \hat{\phi}^{n-2} = \lambda^{\frac{n-2}{3-n}} \\
+\Rightarrow \quad \lambda &= \left(\frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}}\right)^{\frac{3-n}{n-2}}.
+\end{aligned}
+\end{equation}
+We can therefore define the optimal ratio $\hat{\phi}(n)$ as
+\begin{equation}
+\hat{\phi}(n) = \left(\frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}}\right)^{\frac{1}{n-2}}.
+\end{equation}
+
+Inserting this value of $\hat{\phi}(n)$ into the expression for the number of divisions per TDC after SC differentiation [\eqref{eq:divTotalNumber-Full}], we arrive at
+\begin{equation}
+\begin{aligned}
+\hat{D}_n &= \sum_{j=2}^{n-1} \frac{a_j+b_j+c_j}{b_j-a_j} + 1 \\
+&= \sum_{j=2}^{n-1}\left(\frac{2b_j+c_j}{b_j-a_j} - 1\right) + 1 \\
+&= \sum_{j=2}^{n-1}\left(\phi_j-1\right) + 1 \\
+&= (n-2)\left[\hat{\phi}(n)-1\right] + 1 \\
+%&= (n-2)\hat{\phi} + (3-n) \\
+&= (n-2)\left(\frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}}\right)^{\frac{1}{n-2}} + (3-n).
+\end{aligned}
+\end{equation}
+
+The divisional load is minimised when $\hat{\phi}(n)=2$.
+Because of the conditions $b_i-a_i>0$, as well as $a_i \ge 0$, $b_i \ge 0$, and $c_i \ge 0$, the value $\hat{\phi}(n)=2$ can only be achieved if $a_i=c_i=0$, i.e. progenitor cells ($1<i<n$) do not self-renew or divide asymmetrically, they only differentiate.
+
+
+## Minimizing cumulative divisions after lifetime $t$ {-}
+As in the reduced model (\ref{appendix:optim-Reduced}), we make the assumption that SC dynamics are much slower than non-SC dynamics, such that the number of divisions per TDC at time $t$ is approximated by the number of SC divisions at time $t$ plus the number of divisions that the TDC accumulates after leaving the SC compartment.
+I.e. the number of divisions per TDC at time $t$ is
+\begin{equation}
+D_n(t) = (2a_1+c_1)\frac{\gamma}{\ell+\gamma}t + \sum_{j=2}^{n-1} \frac{a_j+b_j+c_j}{b_j-a_j} + 1,
+\end{equation}
+where we have already set $d_i=0$ for $1 \le i < n$.
+Here we minimise the number of divisions that TDCs will have accumulated after SCs have been dividing for a time period $t=\tau$, including divisions accumulated in the stem cells up to this time.
+Note that $\tau$ is the timescale of optimisation, but the lifetime $t$ may be longer or shorter than $\tau$.
+
+We now want to find the stationary points of the Lagrangian function after a lifetime $\tau$:
+\begin{equation}
+\small
+\cL(\tau) = (2b_1+c_1)\frac{\gamma}{\ell+\gamma}\tau + \sum_{j=2}^{n-1} \frac{a_j+b_j+c_j}{b_j-a_j} + 1 - \lambda \left[ \left(\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}\right) - \frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N_{\rm SC}^*} \right],
+\end{equation}
+where we have used the expression for the steady-state population size from \eqref{eq:SSn-Full} to derive the constraint for the number of TDCs, as well as using $a_1=b_1$ which is required for homeostasis.
+
+Finding the stationary points of this Lagrangian function is achieved by setting the derivatives $\partial\cL(\tau)/\partial p_i$ ($p \in \left\{a,b,c\right\}$), $\partial\cL(\tau)/\partial\gamma$, $\partial\cL(\tau)/\partial\ell$ and $\partial\cL(\tau)/\partial\lambda$ equal to zero.
+These derivatives satisfy:
+\begin{equation}
+\begin{aligned}
+%
+\frac{\partial\cL(\tau)}{\partial b_1} &= 2\frac{\gamma}{\ell+\gamma}\tau - 2\lambda \frac{d_n N_n^*}{(2b_1+c_1)^2\frac{\gamma}{\ell+\gamma}N_{\rm SC}^*}, \\
+%
+\frac{\partial\cL(\tau)}{\partial c_1} &= \frac{\gamma}{\ell+\gamma}\tau - \lambda \frac{d_n N_n^*}{(2b_1+c_1)^2\frac{\gamma}{\ell+\gamma}N_{\rm SC}^*}, \\
+%
+\frac{\partial\cL(\tau)}{\partial a_{i>1}} &= \frac{2b_i+c_i}{(b_i-a_i)^2} - \frac{\lambda}{b_i-a_i} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, \\
+%
+\frac{\partial\cL(\tau)}{\partial b_{i>1}} &= -\frac{2a_i+c_i}{(b_i-a_i)^2} + \lambda\frac{2a_i+c_i}{(2b_i+c_i)(b_i-a_i)} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, \\
+%
+\frac{\partial\cL(\tau)}{\partial c_{i>1}} &= \frac{1}{b_i-a_i} - \frac{\lambda}{2b_i+c_i} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, \\
+%
+\frac{\partial\cL(\tau)}{\partial \gamma} &= (2b_1+c_1)\frac{\ell}{(\ell+\gamma)^2}\tau - \lambda \frac{d_n N_n^*}{(2b_1+c_1)N_{\rm SC}^*}\frac{\ell}{\gamma^2}, \\
+%
+\frac{\partial\cL(\tau)}{\partial \ell} &= -(2b_1+c_1)\frac{\gamma}{(\ell+\gamma)^2}\tau + \lambda \frac{d_n N_n^*}{(2b_1+c_1)N_{\rm SC}^*}\frac{1}{\gamma}, \\
+%
+\frac{\partial\cL(\tau)}{\partial \lambda} &= -\left(\prod_{k=2}^{n-1} \frac{2b_k + c_k}{b_k-a_k}\right) + \frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N_{\rm SC}^*}.
+%
+\end{aligned}
+\end{equation}
+Equating each derivative to zero, we arrive at the following conditions:
+\begin{equation}
+\begin{aligned}
+%
+\frac{\partial\cL(\tau)}{\partial b_1} = 0 \quad &\Rightarrow \quad (2b_1+c_1)^2\left(\frac{\gamma}{\ell+\gamma}\right)^2 \tau = \lambda \frac{d_n N_n^*}{N_{\rm SC}^*}, && {\rm (i)}\\
+%
+\frac{\partial\cL(\tau)}{\partial c_1} = 0 \quad &\Rightarrow \quad (2b_1+c_1)^2\left(\frac{\gamma}{\ell+\gamma}\right)^2 \tau = \lambda \frac{d_n N_n^*}{N_{\rm SC}^*}, && {\rm (ii)}\\
+%
+\frac{\partial\cL(\tau)}{\partial a_{i>1}} = 0 \quad &\Rightarrow \quad \frac{2b_i+c_i}{b_i-a_i} = \lambda \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, && {\rm (iii)}\\
+%
+\frac{\partial\cL(\tau)}{\partial b_{i>1}} = 0 \quad &\Rightarrow \quad \frac{2a_i+c_i}{b_i-a_i} = \lambda \frac{2a_i+c_i}{2b_i+c_i} \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, && {\rm (iv)}\\
+%
+\frac{\partial\cL(\tau)}{\partial c_{i>1}} = 0 \quad &\Rightarrow \quad \frac{2b_i+c_i}{b_i-a_i} = \lambda \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}, && {\rm (v)}\\
+%
+\frac{\partial\cL(\tau)}{\partial \gamma} = 0 \quad &\Rightarrow \quad (2b_1+c_1)^2\left(\frac{\gamma}{\ell+\gamma}\right)^2 \tau = \lambda \frac{d_n N_n^*}{N_{\rm SC}^*}, && {\rm (vi)}\\
+%
+\frac{\partial\cL(\tau)}{\partial \ell} = 0 \quad &\Rightarrow \quad (2b_1+c_1)^2\left(\frac{\gamma}{\ell+\gamma}\right)^2 \tau = \lambda \frac{d_n N_n^*}{N_{\rm SC}^*}, && {\rm (vii)}\\
+%
+\frac{\partial\cL(\tau)}{\partial \lambda} = 0 \quad &\Rightarrow \quad \prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k} = \frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N_{\rm SC}^*}. && {\rm (viii)}
+\end{aligned}
+\label{eq:conditionsT-Full}
+\end{equation}
+We have used the condition $b_i-a_i>0$ above.
+We have also had to impose $2b_i+c_i>0$, which follows from the fact that we must have some differentiation flux from compartment $i$ to $i+1$ and therefore requires the condition $b_i+c_i>0$ (as well as $b_i \ge 0$ and $c_i \ge 0$ by definition).
+The term $2a_i+c_i \ge 0$ can be zero iff $a_i=0$ and $c_i=0$, so we cannot divide by this term in general.
+The conditions (iii) and (v) above are equivalent, and condition (iv) can be shown to be consistent with (iii) and (v) by replacing the $2b_i+c_i$ with this value as defined by condition (iii).
+Meanwhile, conditions (i), (ii), (vi), and (vii) are equivalent.
+
+Ultimately, the conditions (iii)-(v) in \eqref{eq:conditionsT-Full} can be reduced to
+\begin{equation}
+\phi_i = \lambda \prod_{k=2}^{n-1} \phi_k \quad \mbox{where} \quad \phi_i = \frac{2b_i+c_i}{b_i-a_i},
+\end{equation}
+and hence the ratios $\phi_i$ are conserved across compartments $1<i<n$:
+\begin{equation}
+\frac{2b_i+c_i}{b_i-a_i} = \phi_i = \hat{\phi}(n) = \lambda^{\frac{1}{3-n}}.
+\end{equation}
+Conditions (i), (ii), (vi), and (vii) in \eqref{eq:conditionsT-Full} can be reduced to
+\begin{equation}
+(2b_1+c_1)\frac{\gamma}{\ell+\gamma} = \sqrt{\frac{\lambda}{\tau}\frac{d_n N_n^*}{N_{\rm SC}^*}}.
+\end{equation}
+From condition (viii), i.e. the steady state population size, the value of $\lambda$ is then defined as
+\begin{equation}
+\begin{aligned}
+\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k} &= \frac{d_n N^*_n}{(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N_{\rm SC}^*} \\
+\Rightarrow\quad \lambda^{\frac{n-2}{3-n}} &= \frac{d_n N_n^*}{\sqrt{\frac{\lambda}{\tau}\frac{d_n N_n^*}{N_{\rm SC}^*}}N_{\rm SC}^*} = \sqrt{\frac{\tau}{\lambda}\frac{d_n N_n^*}{N_{\rm SC}^*}} \\
+\Rightarrow\quad \lambda &= \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{3-n}{n-1}}.
+\end{aligned}
+\end{equation}
+Therefore, the optimised parameter combinations satisfy
+\begin{equation}
+\hat{\phi}(n) = \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}}, \qquad
+(2b_1+c_1)\frac{\gamma}{\ell+\gamma} = \frac{1}{\tau} \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}}.
+\end{equation}
+
+The cumulative number of divisions after time $t$, $\hat{D}_n(t)$, then satisfies
+\begin{equation}
+\begin{aligned}
+\hat{D}_n(t) &= (2b_1+c_1)\frac{\gamma}{\ell+\gamma}t + \sum_{j=2}^{n-1} \frac{a_j+b_j+c_j}{b_j-a_j} + 1 \\
+&= (2b_1+c_1)\frac{\gamma}{\ell+\gamma}t + \sum_{j=2}^{n-1}\left[\hat{\phi}(n) - 1\right] + 1 \\
+&= \frac{t}{\tau} \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}} + (n-2)\left[\left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}}-1\right] + 1 \\
+&= \left(\frac{t}{\tau} + n-2\right) \left(\tau \frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}} + (3-n).
+% &= (n-1)\left(t\frac{d_n N^*_n}{N_{\rm SC}^*}\right)^{\frac{1}{n-1}} + (3-n).
+\end{aligned}
+\end{equation}
+
+# References
