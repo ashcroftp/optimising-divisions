@@ -21,7 +21,7 @@ header-includes: >
   \newcommand{\cL}{\mathcal{L}}
   \DeclareMathOperator*{\argmax}{arg\,max}
   \DeclareMathOperator*{\argmin}{arg\,min}
-bibliography: bib.bib
+bibliography: bib
 biblio-style: apalike3.bst
 fontfamily: mathpazo
 spacing: onehalf
@@ -32,7 +32,7 @@ abstract: >
   It has been hypothesised that the structure of tissues and the hierarchy of differentiation from stem cell to terminally-differentiated cell play a significant role in reducing the incidence of cancer in that tissue.
   One specific mechanism by which this risk can be reduced is by minimising the number of divisions -- and hence the mutational risk -- that cells accumulate as they divide to maintain tissue homeostasis.
   Here we investigate a mathematical model of cell division in a hierarchical tissue, calculating and minimising the divisional load while constraining parameters such that homeostasis is maintained.
-  We show that the minimal divisional load is achieved by binary division tress with progenitor cells incapable of self-renewal.
+  We show that the minimal divisional load is achieved by binary division trees with progenitor cells incapable of self-renewal.
   Contrary to the protection hypothesis, we find that an increased stem cell turnover can lead to lower divisional load.
   Furthermore, we find that the optimal tissue structure depends on the time horizon of the duration of homeostasis, with faster stem cell division favoured in short-lived organisms and more progenitor compartments favoured in longer-lived organisms.
 ---
@@ -123,8 +123,8 @@ Furthermore, what is the impact of the difference between the timescale on which
 
 In the next section, we introduce our model of cell proliferation in a hierarchical population structure.
 For the purpose of our analyses, we primarily consider a reduced model in which only symmetric division events can occur.
-The full model, which considers symmetric and asymmetric cell divisions, as well as cell death, is outlined but the full analysis can only be found in the Appendices.
-We further consider the possibility for stem cells to be non-dividing, as it has been suggested that quiescence is another mechanism of cancer defence in hierarchical tissues \citep{adams:CSC:2015}.
+The full model, which considers symmetric and asymmetric cell divisions, as well as cell death, is described in the Appendices.
+We further consider the possibility for stem cells to be non-dividing in the full model, as it has been suggested that quiescence is another mechanism of cancer defence in hierarchical tissues \citep{adams:CSC:2015}.
 Using these models we quantify the number of divisions that cells accumulate.
 We then use the method of Lagrange multipliers to compute the optimum tissue architecture which minimises divisional load, while constraining the number of terminally-differentiated cells under homeostatic conditions.
 This optimisation is performed on post-stem cell divisions, as well as for total divisions accumulated over a given time horizon.
@@ -137,23 +137,20 @@ Cells are collected into compartments which represent their level of differentia
 Within each compartment, the cells are indistinguishable.
 The compartments are labelled by $i \in \{1,2,\dots,n\}$, where $i=1$ corresponds to stem cells (SC), $1<i<n$ are progenitor cells, and $i=n$ are terminally-differentiated cells (TDC).
 The number of cells in compartment $i$ is denoted as $N_i$.
-Additionally, we consider a compartment of non-dividing (quiescent) SCs, labelled $i=0$.
 This structure is highlighted in \figref{fig:1-model}A.
 We note that we only consider a linear population structure, with population branching here ignored to reduce the number of model parameters.
+In the full model we additionally consider a compartment of non-dividing (quiescent) SCs, labelled $i=0$.
+See \ref{appendix:fullModel} for details.
 
 ```{r 1-model, fig.pos = "ht", out.width = "\\textwidth", fig.cap = caption}
-caption <- "Model schematic.
+caption <- "Reduced model schematic.
 A) We consider a hierarchical population of cells, with stem cells (SC) at the top of the hierarchy giving rise to progenitor cells and ultimately terminally-differentiated cells (TDC).
-SC can be divided into two subpopulations: a nondividing quiescent fraction (grey) and an active fraction (blue).
-B) In the full model, cells in compartment $i \\ge 1$ of the hierarchical population structure can divide symmetrically to generate two offspring of their own type (occurs with rate $a_i$) or two offspring that are differentiated from the parent (rate $b_i$), or they can divide asymmetrically to produce one offspring each type (rate $c_i$).
-Cells also die at rate $d_i$.
-Finally, the SC subpopulations are linked through activation and deactivation rates $\\gamma$ and $\\ell$, respectively.
-C) A reduced model is derived from the full model, where cells can only symmetrically self-renew or symmetrically differentiate and there are no quiescent SCs.
+B) In this reduced model cells can only symmetrically self-renew or symmetrically differentiate and there are no quiescent SCs.
 Here cells in compartment $i$ divide with rate $\\beta_i$.
 With probability $\\alpha_i$ the daughters are both of type $i$, and with complimentary probability $1-\\alpha_i$ the daughters are of differentiated type $i+1$.
 The parameter $\\beta_n$ assumes the role of the death rate of TDCs, where we have $\\alpha_n = 0$.
 We also ignore SC quiescence in the reduced model."
-knitr::include_graphics("figures/1-model.pdf")
+knitr::include_graphics("figures/1-model_reduced.pdf")
 ```
 
 ## Dynamics
@@ -162,63 +159,15 @@ A division event produces two daughter cells, each of which may remain in the sa
 We do not consider the possibility of de-differentiation (i.e. cells cannot move from compartment $i$ to compartment $i-1$).
 De-differentiation would lead to an increase in divisions accumulated during homeostasis compared to a forward-only differentiating tissue.
 
-Concretely, in the full model (\figref{fig:1-model}B) cells in compartment $i$ divide to generate two daughter cells in the same compartment (symmetric self-renewal) with rate $a_i$.
-With rate $b_i$, two differentiated daughter cells of type $i+1$ are produced (symmetric differentiation).
-Cells can also divide asymmetrically with rate $c_i$, such that one daughter remains as type $i$ and the other differentiates to type $i+1$.
-The quiescent SCs ($i=0$) do not divide, but can be activated with rate $\gamma$, while the active SCs ($i=1$) can deactivate with rate $\ell$.
-These dynamics are similar to those proposed by \citet{glauche:PLoSCB:2009,takizawa:JEM:2011}.
-Finally, all non-quiescent cells ($i>0$) die with rate $d_i$.
-
-For the full model (\figref{fig:1-model}B), the number of cells per compartment are described by the following ordinary differential equations (ODE):
-\begin{equation}
-\begin{aligned}
-\dot{N}_0 &= -\gamma N_0 + \ell N_1, \\
-\dot{N}_1 &= \gamma N_0 - (\ell+b_1+d_1-a_1)N_1, \\
-\dot{N}_{i} &= (2b_{i-1} + c_{i-1})N_{i-1} - (b_i+d_i-a_i)N_i \quad\mbox{for}\quad 2 \le i \le n.
-\end{aligned}
-\label{eq:model-Full}%
-\end{equation}
-
-To ensure that the SCs are omnipresent we require $a_1 = b_1 + d_1$, i.e. any SC lost to differentiation or death is replaced by the self-renewal of another SC.
-To ensure homoeostasis is possible we require $b_i + d_i - a_i > 0$ for $2 \le i \le n$, otherwise $N_i$ would grow exponentially.
-We further assume that $a_n = b_n = c_n = 0$ such that TDCs do not divide, as well as $d_n>0$ to ensure that a steady-state exists.
-
-Under homeostatic conditions we have $\dot{N}_i = 0$ for each compartment $0 \le i \le n$.
-From \eqref{eq:model-Full}, the equilibrium solution $N_i^*$ satisfies
-\begin{equation}
-\begin{aligned}
-N_0^* &= \frac{\ell}{\ell+\gamma}N_{\rm SC}^*, \\
-N_1^* &= \frac{\gamma}{\ell+\gamma}N_{\rm SC}^*, \\
-(b_i+d_i-a_i) N_i^* &= (2b_{i-1}+c_{i-1})N_{i-1}^*  \quad\mbox{for}\quad 2 \le i \le n,
-\end{aligned}
-\label{eq:SS-Full}%
-\end{equation}
-where $N_{\rm SC}^*=  N_0^*+N_1^*$ is the total number of stem cells.
-For $2 \le i \le n$, \eqref{eq:SS-Full} can be solved recursively to give
-\begin{equation}
-\begin{aligned}
-N_i^* &= \left[\prod_{k=1}^{i-1} \frac{2b_k+c_k}{b_{k+1}+d_{k+1}-a_{k+1}}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^* \\
-&= \frac{2b_1+c_1}{b_i+d_i-a_i}\left[\prod_{k=2}^{i-1} \frac{2b_k+c_k}{b_k+d_k-a_k}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^* \quad\mbox{for}\quad 2 \le i \le n.
-\end{aligned}
-\label{eq:SSi-Full}%
-\end{equation}
-In particular, for TDCs ($i=n$) we have
-\begin{equation}
-N_n^* = \frac{2b_1+c_1}{d_n}\left[\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k+d_k-a_k}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^*.
-\label{eq:SSn-Full}%
-\end{equation}
-
-## Reduced model
-To build intuition and guide analytical calculations, we primarily consider a reduced model (\figref{fig:1-model}C), where we ignore cell death and asymmetric cell division, as well as SC quiescence.
-In this scenario, we write $a_i = \alpha_i \beta_i$ and $b_i = (1-\alpha_i)\beta_i$, where $\beta_i$ is the division rate of cells in compartment $i$, and $\alpha_i$ is their probability of self-renewal (correspondingly, $1-\alpha_i$ is the probability of differentiation) following a division event.
-This reduced model is described by the set of ordinary differential equations
+To build intuition and guide analytical calculations, we primarily consider the reduced model (\figref{fig:1-model}B) in which cells only divide symmetrically: We ignore cell death and asymmetric cell division, as well as SC quiescence compared to the full model that is described in \ref{appendix:fullModel}.
+This reduced model is parametrised by $\beta_i$, which is the division rate of cells in compartment $i$, and $\alpha_i$, which is their probability of self-renewal (correspondingly, $1-\alpha_i$ is the probability of differentiation) following a division event.
+The reduced model is described by the set of ordinary differential equations
 \begin{equation}
 \dot{N}_i = 2 (1 - \alpha_{i-1})\beta_{i-1} N_{i-1} - (1 - 2\alpha_i) \beta_i N_i,
 \label{eq:model-Reduced}
 \end{equation}
 where the first term describes the inflow of two daughter cells from compartment $i-1$ and the second term is the net loss rate (differentiation minus self-renewal) of cells from compartment $i$.
 Furthermore, we set $\alpha_n = 0$ and the parameter $\beta_n$ assumes the role of the death rate of the TDCs.
-In the reduced model we ignore SC quiescence by setting $N_0=0$, as well as $\gamma=\ell=0$.
 
 Under homeostasis the number of cells per compartment does not change (${\dot{N}_i=0}$).
 The steady state of \eqref{eq:model-Reduced}, which we write as $N_i^*$, satisfies the relation
@@ -243,7 +192,7 @@ N_n^* = \frac{\beta_1}{\beta_n}\left[\prod_{k=2}^{n-1} \frac{2(1 - \alpha_k)}{1 
 For compartmental models, the expected number of divisions that cells accumulate in a tissue has previously been calculated using two methods:
 Firstly, \citet{derenyi:NatComms:2017} constructed ordinary differential equations (ODE) for the cumulative number of divisions across all cells in a compartment, and from this they extracted the average number of divisions that cells undergo during their lifetime.
 Alternatively, \citet{boettcher:Interface:2018} constructed an explicit set of ODEs for sub-populations of cells of type $i$ that have undergone $j$ division events, from which the mean number of divisions per cell is easily extracted.
-These models yield identical results for the mean number of divisions in the full and reduced models, as described in \ref{appendix:divLoad-Reduced} and \ref{appendix:divLoad-Full}, respectively.
+These models yield identical results for the mean number of divisions in the reduced and full models, as described in \ref{appendix:divLoad-Reduced} and \ref{appendix:divLoad-Full}, respectively.
 
 
 Briefly, following the method of \citet{derenyi:NatComms:2017}, the cumulative number of divisions accumulated across all SCs, $T_1$, in the reduced model satisfies the ODE
@@ -276,25 +225,7 @@ Hence, in the reduced model, the divisions accumulated by TDCs after time $t$ is
 D_n(t) \approx D_{\rm SC}(t) + D_n = \beta_1 t + \sum_{j=2}^n \frac{1}{1-2\alpha_j}.
 \label{eq:divTDC-t-Reduced}
 \end{equation}
-
-The above methodology can also be applied to the full model, as described in \ref{appendix:divLoad-Full}.
-The average number of divisions that a SC (averaged over quiescent and non-quiescent) has accumulated in a time period $t$, $D_{\rm SC}(t)$, is now
-\begin{equation}
-D_{\rm SC}(t) = (2a_1+c_1) \frac{\gamma}{\ell+\gamma} t.
-\label{eq:divSC-Full}
-\end{equation}
-The mean number of divisions that are accumulated by a single TDC after leaving the stem cell compartment, $D_n$, is
-\begin{equation}
-D_n = \sum_{j=2}^n \frac{a_j+b_j+c_j+d_j}{b_j+d_j-a_j} 
-= \sum_{j=2}^{n-1} \left(\frac{2b_j+c_j+2d_j}{b_j+d_j-a_j} - 1\right) + 1.
-\label{eq:divTDC-Full}
-\end{equation}
-Finally, we approximate the mean number of divisions per TDC at time $t$, $D_n(t)$, as the sum of \eqref{eq:divSC-Full} and \eqref{eq:divTDC-Full}:
-\begin{equation}
-D_n(t) \approx (2a_1+c_1) \frac{\gamma}{\ell+\gamma} t + \sum_{j=2}^{n-1} \left(\frac{2b_j+c_j+2d_j}{b_j+d_j-a_j} - 1\right) + 1.
-\label{eq:divTDC-t-Full}
-\end{equation}
-This equation is equivalent to the result of \citet{derenyi:NatComms:2017}, but here with the inclusion of SC quiescence.
+This equation is equivalent to the result of \citet{derenyi:NatComms:2017} for the reduced dynamics.
 The calculation differs from \citet{derenyi:NatComms:2017} in the optimisation procedure in the next steps.
 
 ## Optimising tissue architecture
@@ -333,8 +264,7 @@ Due to the discrete nature of $n$, we cannot identify its optimum value through 
 We can, however, identify it through graphical methods.
 The number of SCs does not appear in the objective function in the Lagrangian, so this too must be optimised by graphical methods.
 
-The Lagrangian functions for the full model can be constructed analogously from the population size constraint in \eqref{eq:SSn-Full}, 
-as well as the number of divisions accumulated after SC differentiation [\eqref{eq:divTDC-Full}] or divisional load after time $t$ [\eqref{eq:divTDC-t-Full}].
+The Lagrangian functions for the full model can be constructed analogously.
 See \ref{appendix:optim-Full} for details.
 
 
@@ -369,13 +299,16 @@ By substituting \eqref{eq:alpha-lambda} into \eqref{eq:constraint-Simple} and th
 \begin{equation}
 \lambda = \left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right)^\frac{3-n}{n-2}.
 \end{equation}
-By rearranging \eqref{eq:alpha-lambda} we can now define the values of $\alpha_i$ which minimise the number of divisions per TDC during homeostasis and for a given number of compartments, which we write as $\hat{\alpha}(n)$:
+By rearranging \eqref{eq:alpha-lambda} we can now define the values of $\alpha_i$ which minimise the number of divisions per TDC during homeostasis and for a given number of compartments.
+These values will depend explicitly on the number of compartment size $n$, hence we write this value as $\hat{\alpha}(n)$, which satisfies
 \begin{equation}
 \hat{\alpha}(n) = \frac{\lambda^{\frac{1}{3-n}}-2}{2\lambda^{\frac{1}{3-n}}-2}
 = \frac{\left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right)^\frac{1}{n-2}-2}{2\left(\frac{\beta_n N_n^*}{\beta_1 N_1^*}\right)^\frac{1}{n-2}-2}.
 \label{eq:alpha}
 \end{equation}
-From this equation, we see that an increase in the number of compartments $n$ must be compensated by a decrease in the progenitor self-renewal probability $\hat{\alpha}(n)$ to maintain the homeostatic level of TDCs.
+We here want to differentiate between the subscript notation, which is just the index of the compartment, and the bracket notation, denoting that the optimised parameter value $\hat{\alpha}(n)$ depends on the number of compartments in the hierarchy.
+
+From \eqref{eq:alpha}, we see that an increase in the number of compartments $n$ must be compensated by a decrease in the progenitor self-renewal probability $\hat{\alpha}(n)$ to maintain the homeostatic level of TDCs.
 However, $\hat{\alpha}(n)$ is a probability and is bounded from below by zero.
 Once $n$ is increased sufficiently such that $(\beta_n N_n^*/\beta_1 N_1^*)^\frac{1}{n-2} < 2$, we have to artificially set $\hat{\alpha}(n) = 0$ and there will be a new (increased) steady state TDC population size $\hat{N}_n$.
 From \eqref{eq:SSn-Reduced}, the number of TDCs will satisfy
@@ -417,7 +350,7 @@ caption <- "Self-renewal probability ($\\hat{\\alpha}(n)$; A), TDC population si
 Here we have fixed the TDC properties ${\\beta_n = 1/120}$~day\\textsuperscript{$-1$} and ${N_n^* = 10^{13}}$~cells, which are approximate numbers for red blood cells in humans \\citep{nombela:BloodAdv:2017}.
 Horizontal line is the approximate SC turnover in humans ($N_1^* = 10^{5}$~cells; $\\beta_1 = 1$~yr\\textsuperscript{$-1$}; \\citet{leesix:Nature:2018}).
 Diagonal dashed line represents the optimum number of compartments $\\hat{n}$ for a given SC turnover which minimises the cumulative number of divisions [\\eqref{eq:nHat-noTime}].
-The values of $\\hat{\\alpha}(n)$, $\\hat{N}_n$, and $\\hat{D}_n$ along these slices are shown in panels D, E, and F, respectively.
+The values of $\\hat{\\alpha}(n)$, $\\hat{N}_n$, and $\\hat{D}_n$ along these solid and dashed lines are shown in panels D, E, and F, respectively.
 Colour scales for $\\hat{N}_n$ and $\\hat{D}_n$ are truncated for visual clarity."
 
 ## Blood system parameters ----
@@ -624,6 +557,8 @@ From the condition $\partial\cL(\tau)/\partial\beta_1=0$, we arrive at
 \beta_1 = \sqrt{\frac{\lambda}{\tau}\frac{\beta_n N_n^*}{N_1^*}}.
 \label{eq:beta-lambda}
 \end{equation}
+Note that the SC division rate $\beta_1$ is now decoupled from the SC population size $N_1^*$ for this time-dependent problem, and therefore we can no longer consider SC turnover $\beta_1 N_1^*$ as an independently-variable quantity as was done in \figref{fig:2-noTime-Simple}.
+
 These values of $\alpha_i$ [\eqref{eq:alpha-lambda}] and $\beta_1$ [\eqref{eq:beta-lambda}] can be substituted into the population size constraint \eqref{eq:constraint-Simple}, i.e. the $\partial\cL(\tau)/\partial\lambda=0$ condition, and we can solve for the value of the Lagrange multiplier $\lambda$:
 \begin{equation}
 \lambda = \left(\tau\frac{\beta_n N^*_n}{N^*_1}\right)^\frac{3-n}{n-1}.
@@ -636,6 +571,7 @@ The values of $\alpha_i$ and $\beta_1$ which minimise the number of divisions pe
 \end{equation}
 To satisfy $\hat{\alpha}(n) \ge 0$, we require $(\tau\beta_n N^*_n/N^*_1)^\frac{1}{n-1} \ge 2$.
 This condition imposes $\hat{\beta}_1(n) \ge 2/\tau$.
+Again, we here want to clarify the difference between the subscript notation, which is just the index of the compartment, and the bracket notation, denoting that the optimised parameter values $\hat{\alpha}(n)$ and $\hat{\beta}_1(n)$ depend on the number of compartments in the hierarchy.
 
 From \eqref{eq:SSn-Reduced}, the number of TDCs will satisfy
 \begin{equation}
@@ -676,7 +612,7 @@ These parameters/variables are described by \\eqref{eq:alphabeta}, \\eqref{eq:Nh
 Here we have fixed the TDC properties ${\\beta_n = 1/120}$~day\\textsuperscript{$-1$} and ${N_n^* = 10^{13}}$~cells, which are approximate numbers for red blood cells in humans \\citep{nombela:BloodAdv:2017}.
 Horizontal line in A-D is the approximate SC population size in humans ($N_1^* = 10^{5}$~cells; \\citet{leesix:Nature:2018}).
 Diagonal dashed line represents the optimum number of compartments $\\hat{n}$ for a given SC population size which minimises the cumulative number of divisions [\\eqref{eq:nHat-t}].
-The values of $\\hat{\\alpha}(n)$, $\\hat{\\beta}_1(n)$, $\\hat{N}_n$, and $\\hat{D}_n(t)$ along these slices are shown in panels E-H, respectively.
+The values of $\\hat{\\alpha}(n)$, $\\hat{\\beta}_1(n)$, $\\hat{N}_n$, and $\\hat{D}_n(t)$ along these solid and dashed lines are shown in panels E-H, respectively.
 Colour scales for $\\hat{\\beta}_1(n)$, $\\hat{N}_n$, $\\hat{D}_n(t)$ are truncated for visual clarity."
 
 ## Blood system parameters ----
@@ -851,7 +787,7 @@ plot_grid(
     scale_y_log10(expand = c(0,0), breaks = 10^seq(0,10), labels = sciFormat) +
     scale_fill_viridis_c(limits = c(0,50),
                          guide = guide_colourbar(
-                           title = expression("divisions per TDC" ~ (hat(italic(D))[n])),
+                           title = expression("divisions per TDC" ~ (hat(italic(D))[italic(n)])),
                            title.position = "top",
                            barwidth = 10,
                            title.hjust = 0.5
@@ -909,7 +845,7 @@ plot_grid(
     plotTheme +
     theme(legend.position = "none") +
     labs(x = expression("number of compartments" ~ (italic(n))),
-         y = expression("divisions per TDC" ~ (hat(italic(D))[n]))),
+         y = expression("divisions per TDC" ~ (hat(italic(D))[italic(n)]))),
   
   align = "v", axis = "lrtb", nrow = 2, labels = "AUTO", rel_heights = c(4,3)
 )
@@ -1147,7 +1083,7 @@ ggplot(all.D, aes(x = t, y = D, group = tau, colour = tau)) +
 \clearpage
 
 ## Optimised architectures in the full model
-For the full model, including quiescence and asymmetric division, we can repeat the above analyses using the Lagrangian function
+For the full model (see \ref{appendix:fullModel} for parameter descriptions), including quiescence and asymmetric division, we can repeat the above analyses using the Lagrangian function
 \begin{equation}
 \cL = \sum_{j=2}^{n-1} \left(\frac{2b_j+c_j}{b_j-a_j}-1\right) + 1 - \lambda \left[ \left(\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k-a_k}\right) - \frac{d_n N^*_n}{(2b_1+c_1) \frac{\gamma}{\ell+\gamma}N^*_{\rm SC}} \right],
 \end{equation}
@@ -1158,8 +1094,8 @@ for optimising the divisional load after SC differentiation, and
 \end{equation}
 for optimising divisional load after a lifetime $t$.
 Note that cell death would have to be compensated by additional cell divisions and will result in an increase in the average number of divisions of the surviving cells.
-We have therefore immediately set $d_i=0$ for $1\le i<n$.
-We have also used the condition $a_1=b_1$, which is required for homeostasis.
+We have therefore immediately set the death rate $d_i=0$ for $1\le i<n$.
+We have also used the condition that SC self-renewal and SC differentiation occur at the same rate, $a_1=b_1$, which is required for homeostasis.
 
 The optimisation process is described in full in \ref{appendix:optim-Full}.
 From this analysis we find that the ratio
@@ -1178,7 +1114,7 @@ and the divisional load per TDC is
 \end{equation}
 This divisional load is minimised when $\hat{\phi}(n)=2$, which can only be achieved if $a_i=c_i=0$, i.e. progenitor cells ($1<i<n$) do not self-renew or divide asymmetrically, they only differentiate.
 This pattern was also described by \citet{derenyi:NatComms:2017}.
-By increasing the SC differentiation flux $(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}$, we can reduce the number of compartments while maintaing the TDC population, hence reducing the divisional load (as described for the reduced model).
+By increasing the SC differentiation flux $(2b_1+c_1)\frac{\gamma}{\ell+\gamma}N^*_{\rm SC}$, we can reduce the number of compartments while maintaining the TDC population, hence reducing the divisional load (as described for the reduced model).
 
 When we optimise the tissue architecture based on the total TDC divisional load including SC divisions, we have to include an optimisation timescale $\tau$.
 From our analysis (\ref{appendix:optim-Full}) we find the following relations for the ratio $\hat{\phi}(n)$ and the total SC division rate:
@@ -1196,7 +1132,6 @@ The total SC division rate is bounded by $2/\tau \le (2b_1+c_1)\frac{\gamma}{\el
 The TDC divisional load is minimised when $\hat{\phi}(n)=2$, $(2b_1+c_1)\frac{\gamma}{\ell+\gamma} = 2/\tau$, and $\hat{n} = \log_2(\tau d_n N_n^*/N_{\rm SC}^*)+1$.
 
 # Discussion
-
 In this study we set out to quantify and then minimise the divisional load that is accumulated in terminally-differentiated cells (TDC) in a homeostatic tissue.
 For insight we focussed on a reduced dynamical model in which a division event either lead to symmetric self-renewal or symmetric differentiation.
 Homeostasis was enforced by constraining the number of progenitor cell compartments (i.e. differentiation steps), self-renewal probabilities per compartment, and division rates per compartment such that the TDC population remains at its steady-state level.
@@ -1233,6 +1168,8 @@ Beyond \citet{derenyi:NatComms:2017}, we show that the constant ratio of differe
 Furthermore, we explore the impacts of varying the optimisation timescale, lifetime, SC numbers, and SC quiescence.
 
 Although the number of divisions itself is an important measure for damage accumulation per cell, it is not the full story in terms of cancer prevention.
+Intuitively it is not clear if the total number of divisions per TDC, or only the number of divisions in the SC compartment, is important for cancer initiation and incidence. Tomasetti and Vogelstein have shown that across tissues the dependence of cancer incidence on the number of SC divisions is sub-linear, such that an increase in SC divisions does not lead to a proportional increase in cancer risk \citep{tomasetti:Science:2015,tomasetti:Science:2017}.
+Therefore, other factors are at play, which could be extrinsic (e.g. smoking), or related to tissue architecture.
 \citet{nowak:PNAS:2003} formalised the concepts put forward by \citet{cairns:Nature:1975} to show that preventing self-renewal in all cells downstream of the SC minimises the rate that mutations fixate in the population.
 This simple so-called "linear model" of somatic evolution corresponds to our optimised binary division tree.
 Later, \citet{pepper:PLOSComputationalBiology:2007} extended the serial differentiation model to include cell compartments (as in our model).
@@ -1267,6 +1204,71 @@ Going forward, we would like to bring all of these aspects together to achieve a
 # Appendix {-}
 \setcounter{section}{0}
 \renewcommand{\thesection}{Appendix~\Roman{section}}
+
+# Description of the full model {#appendix:fullModel}
+In addition to the population structure used in the reduced model, we consider a compartment of non-dividing (quiescent) SCs, labelled $i=0$.
+This structure is highlighted in \figref{fig:6-modelFull}A.
+
+```{r 6-modelFull, fig.pos = "ht", out.width = "\\textwidth", fig.cap = caption}
+caption <- "Full model schematic.
+A) We consider a hierarchical population of cells, with stem cells (SC) at the top of the hierarchy giving rise to progenitor cells and ultimately terminally-differentiated cells (TDC).
+SC can be divided into two subpopulations: a nondividing quiescent fraction (grey) and an active fraction (blue).
+B) In the full model, cells in compartment $i \\ge 1$ of the hierarchical population structure can divide symmetrically to generate two offspring of their own type (occurs with rate $a_i$) or two offspring that are differentiated from the parent (rate $b_i$), or they can divide asymmetrically to produce one offspring each type (rate $c_i$).
+Cells also die at rate $d_i$.
+Finally, the SC subpopulations are linked through activation and deactivation rates $\\gamma$ and $\\ell$, respectively."
+knitr::include_graphics("figures/1-model_full.pdf")
+```
+
+In the full model (\figref{fig:6-modelFull}B) cells in compartment $i$ divide to generate two daughter cells in the same compartment (symmetric self-renewal) with rate $a_i$.
+With rate $b_i$, two differentiated daughter cells of type $i+1$ are produced (symmetric differentiation).
+Cells can also divide asymmetrically with rate $c_i$, such that one daughter remains as type $i$ and the other differentiates to type $i+1$.
+The quiescent SCs ($i=0$) do not divide, but can be activated with rate $\gamma$, while the active SCs ($i=1$) can deactivate with rate $\ell$.
+These dynamics are similar to those proposed by \citet{glauche:PLoSCB:2009,takizawa:JEM:2011}.
+Finally, all non-quiescent cells ($i>0$) die with rate $d_i$.
+
+In the reduced model we ignore SC quiescence by setting $N_0=0$, as well as $\gamma=\ell=0$.
+We further set $d_i=0$, as well as denoting $a_i = \alpha_i \beta_i$ and $b_i = (1-\alpha_i)\beta_i$.
+The division rate $\beta_n$ assumes the role of the death rate of the TDCs, where we set $\alpha_n = 0$.
+
+For the full model (\figref{fig:6-modelFull}B), the number of cells per compartment are described by the following ordinary differential equations (ODE):
+\begin{equation}
+\begin{aligned}
+\dot{N}_0 &= -\gamma N_0 + \ell N_1, \\
+\dot{N}_1 &= \gamma N_0 - (\ell+b_1+d_1-a_1)N_1, \\
+\dot{N}_{i} &= (2b_{i-1} + c_{i-1})N_{i-1} - (b_i+d_i-a_i)N_i \quad\mbox{for}\quad 2 \le i \le n.
+\end{aligned}
+\label{eq:model-Full}%
+\end{equation}
+
+To ensure that the SCs are omnipresent we require $a_1 = b_1 + d_1$, i.e. any SC lost to differentiation or death is replaced by the self-renewal of another SC.
+To ensure homoeostasis is possible we require $b_i + d_i - a_i > 0$ for $2 \le i \le n$, otherwise $N_i$ would grow exponentially.
+We further assume that $a_n = b_n = c_n = 0$ such that TDCs do not divide, as well as $d_n>0$ to ensure that a steady-state exists.
+
+Under homeostatic conditions we have $\dot{N}_i = 0$ for each compartment $0 \le i \le n$.
+From \eqref{eq:model-Full}, the equilibrium solution $N_i^*$ satisfies
+\begin{equation}
+\begin{aligned}
+N_0^* &= \frac{\ell}{\ell+\gamma}N_{\rm SC}^*, \\
+N_1^* &= \frac{\gamma}{\ell+\gamma}N_{\rm SC}^*, \\
+(b_i+d_i-a_i) N_i^* &= (2b_{i-1}+c_{i-1})N_{i-1}^*  \quad\mbox{for}\quad 2 \le i \le n,
+\end{aligned}
+\label{eq:SS-Full}%
+\end{equation}
+where $N_{\rm SC}^*=  N_0^*+N_1^*$ is the total number of stem cells.
+For $2 \le i \le n$, \eqref{eq:SS-Full} can be solved recursively to give
+\begin{equation}
+\begin{aligned}
+N_i^* &= \left[\prod_{k=1}^{i-1} \frac{2b_k+c_k}{b_{k+1}+d_{k+1}-a_{k+1}}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^* \\
+&= \frac{2b_1+c_1}{b_i+d_i-a_i}\left[\prod_{k=2}^{i-1} \frac{2b_k+c_k}{b_k+d_k-a_k}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^* \quad\mbox{for}\quad 2 \le i \le n.
+\end{aligned}
+\label{eq:SSi-Full}%
+\end{equation}
+In particular, for TDCs ($i=n$) we have
+\begin{equation}
+N_n^* = \frac{2b_1+c_1}{d_n}\left[\prod_{k=2}^{n-1} \frac{2b_k+c_k}{b_k+d_k-a_k}\right] \frac{\gamma}{\ell+\gamma}N_{\rm SC}^*.
+\label{eq:SSn-Full}%
+\end{equation}
+
 
 # Counting divisions in the reduced model {#appendix:divLoad-Reduced}
 
